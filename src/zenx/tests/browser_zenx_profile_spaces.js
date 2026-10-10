@@ -1,0 +1,287 @@
+/* Any copyright is dedicated to the Public Domain.
+   https://creativecommons.org/publicdomain/zero/1.0/ */
+
+"use strict";
+
+// Zen keeps its own tests out of ESLint (see the eslint-ignores patch); the
+// mochitest and window globals used here are not configured for zenx/tests.
+/* eslint-disable no-undef */
+
+add_setup(async function () {
+  await gZenWorkspaces.promiseInitialized;
+  await setupFakeProfileGroup();
+});
+
+add_task(async function test_publishes_spaces_of_this_profile() {
+  const { space } = await createSpace("ZenX Published");
+  const registryPref = REGISTRY_PREFIX + CURRENT_PROFILE_ID;
+
+  await TestUtils.waitForCondition(
+    () => readPrefJSON(registryPref)?.spaces?.some(s => s.uuid === space.uuid),
+    "This profile's spaces should be published to the shared registry"
+  );
+  const entry = readPrefJSON(registryPref);
+  Assert.equal(entry.v, 1, "The registry entry should be versioned");
+  Assert.equal(
+    entry.spaces.find(s => s.uuid === space.uuid).name,
+    "ZenX Published",
+    "The space name should be published"
+  );
+  Assert.ok(
+    SelectableProfileService.trackPref.calledWith(registryPref),
+    "The registry pref should be shared with the profile group"
+  );
+});
+
+add_task(async function test_shows_and_opens_spaces_of_other_profiles() {
+  const updated = waitForRemoteSpacesUpdate();
+  Services.prefs.setStringPref(
+    REGISTRY_PREFIX + OTHER_PROFILE_ID,
+    JSON.stringify({
+      v: 1,
+      spaces: [{ uuid: "remote-space-1", name: "Fun", icon: "🎉" }],
+    })
+  );
+  await updated;
+
+  const button = document.querySelector(
+    "#zen-workspaces-button .zenx-remote-space[zenx-space-id='remote-space-1']"
+  );
+  Assert.ok(button, "The other profile's space should be in the switcher");
+  Assert.equal(
+    button.getAttribute("zenx-profile-id"),
+    String(OTHER_PROFILE_ID),
+    "The button should know which profile owns the space"
+  );
+  Assert.ok(
+    document.documentElement.hasAttribute("zenx-has-remote-spaces"),
+    "The switcher should stay visible"
+  );
+  Assert.ok(
+    !button.parentElement.lastElementChild.hasAttribute("zen-workspace-id"),
+    "Other profiles' spaces should come after this profile's spaces"
+  );
+
+  button.doCommand();
+  await TestUtils.waitForCondition(
+    () => SelectableProfileService.sendCommandLine.called,
+    "Clicking should hand off to the other profile"
+  );
+  Assert.deepEqual(
+    SelectableProfileService.sendCommandLine.lastCall.args,
+    ["/fake/profiles/Personal", ["--space", "remote-space-1"], true],
+    "The running instance should be asked to switch to the space"
+  );
+
+  // When the other profile is not running, it is started on that space.
+  SelectableProfileService.sendCommandLine.throws(new Error("not running"));
+  button.doCommand();
+  await TestUtils.waitForCondition(
+    () => SelectableProfileService.execProcess.called,
+    "The other profile should be started"
+  );
+  const args = SelectableProfileService.execProcess.lastCall.args[0];
+  Assert.ok(
+    args
+      .join(" ")
+      .endsWith("--profile /fake/profiles/Personal --space remote-space-1"),
+    `The profile should start on the space (${args.join(" ")})`
+  );
+  SelectableProfileService.sendCommandLine.reset();
+
+  const removed = waitForRemoteSpacesUpdate();
+  Services.prefs.clearUserPref(REGISTRY_PREFIX + OTHER_PROFILE_ID);
+  await removed;
+  Assert.ok(
+    !document.querySelector("#zen-workspaces-button .zenx-remote-space"),
+    "Spaces should disappear with the registry entry"
+  );
+});
+
+add_task(async function test_imports_space_sent_from_other_profile() {
+  const handoffPref = HANDOFF_PREFIX + CURRENT_PROFILE_ID;
+  const originalWorkspace = gZenWorkspaces.activeWorkspace;
+  Services.prefs.setStringPref(
+    handoffPref,
+    JSON.stringify({
+      "handoff-1": {
+        v: 1,
+        id: "handoff-1",
+        from: OTHER_PROFILE_ID,
+        at: Date.now(),
+        space: {
+          type: "space",
+          name: "Moved Here",
+          icon: "🚚",
+          sourceUuid: "source-space-uuid",
+          items: [
+            { type: "tab", url: "https://example.com/", isPinned: true },
+            { type: "tab", url: "https://example.org/" },
+          ],
+        },
+      },
+    })
+  );
+
+  let imported;
+  await TestUtils.waitForCondition(() => {
+    imported = gZenWorkspaces
+      .getWorkspaces()
+      .find(space => space.zenxMovedFrom === "source-space-uuid");
+    return imported;
+  }, "The space should be imported");
+  registerCleanupFunction(async () => {
+    if (gZenWorkspaces.getWorkspaceFromId(imported.uuid)) {
+      await switchToExistingSpace(originalWorkspace);
+      await gZenWorkspaces.removeWorkspace(imported.uuid);
+    }
+  });
+
+  Assert.equal(imported.name, "Moved Here", "The name should be kept");
+  Assert.equal(imported.icon, "🚚", "The icon should be kept");
+  const tabs = gZenWorkspaces.allStoredTabs.filter(
+    tab => tab.getAttribute("zen-workspace-id") === imported.uuid
+  );
+  Assert.ok(
+    tabs.some(tab => tab.pinned),
+    "Pinned tabs should stay pinned"
+  );
+  Assert.equal(
+    tabs.filter(tab => !tab.hasAttribute("zen-empty-tab")).length,
+    2,
+    "Both tabs should be imported"
+  );
+
+  await TestUtils.waitForCondition(
+    () => !Services.prefs.prefHasUserValue(handoffPref),
+    "The handoff should be consumed"
+  );
+  await TestUtils.waitForCondition(
+    () =>
+      readPrefJSON(REGISTRY_PREFIX + CURRENT_PROFILE_ID)?.spaces?.some(
+        s => s.movedFrom === "source-space-uuid"
+      ),
+    "The adoption should be published so the source drops its copy"
+  );
+
+  // Delivering the same handoff again must not duplicate the space.
+  Services.prefs.setStringPref(
+    handoffPref,
+    JSON.stringify({
+      "handoff-1": {
+        v: 1,
+        id: "handoff-1",
+        from: OTHER_PROFILE_ID,
+        at: Date.now(),
+        space: {
+          type: "space",
+          name: "Moved Here",
+          items: [],
+          sourceUuid: "source-space-uuid",
+        },
+      },
+    })
+  );
+  await TestUtils.waitForCondition(
+    () => !Services.prefs.prefHasUserValue(handoffPref),
+    "The repeated handoff should be consumed"
+  );
+  Assert.equal(
+    gZenWorkspaces
+      .getWorkspaces()
+      .filter(space => space.zenxMovedFrom === "source-space-uuid").length,
+    1,
+    "The space should only be imported once"
+  );
+});
+
+add_task(async function test_moves_space_to_other_profile() {
+  const { space, originalWorkspace } = await createSpace("ZenX Outgoing");
+  const tab = BrowserTestUtils.addTab(gBrowser, "https://example.com/zenx");
+  await BrowserTestUtils.browserLoaded(tab.linkedBrowser);
+  gZenWorkspaces.moveTabToWorkspace(tab, space.uuid);
+
+  Assert.ok(
+    await ZenXProfileSpaces.moveSpaceToProfile(
+      window,
+      space.uuid,
+      OTHER_PROFILE_ID
+    ),
+    "The move should start"
+  );
+  Assert.ok(
+    SelectableProfileService.launchInstance.called,
+    "The target profile should be brought up"
+  );
+
+  const handoffs = readPrefJSON(HANDOFF_PREFIX + OTHER_PROFILE_ID);
+  const handoff = Object.values(handoffs)[0];
+  Assert.equal(handoff.from, CURRENT_PROFILE_ID, "The sender is recorded");
+  Assert.equal(handoff.space.sourceUuid, space.uuid, "The space is recorded");
+  Assert.ok(
+    handoff.space.items.some(item => item.url === "https://example.com/zenx"),
+    "The space's tabs should be sent"
+  );
+  Assert.ok(
+    ZenXProfileSpaces.getPendingMoves()[space.uuid],
+    "The move should be pending"
+  );
+  Assert.ok(
+    gZenWorkspaces.getWorkspaceFromId(space.uuid),
+    "The space stays here until the target adopts it"
+  );
+
+  // The target profile adopts the space and publishes it.
+  Services.prefs.setStringPref(
+    REGISTRY_PREFIX + OTHER_PROFILE_ID,
+    JSON.stringify({
+      v: 1,
+      spaces: [
+        { uuid: "adopted-uuid", name: "ZenX Outgoing", movedFrom: space.uuid },
+      ],
+    })
+  );
+  await TestUtils.waitForCondition(
+    () => !gZenWorkspaces.getWorkspaceFromId(space.uuid),
+    "The space should be removed here once adopted"
+  );
+  Assert.ok(
+    !ZenXProfileSpaces.getPendingMoves()[space.uuid],
+    "The move should be settled"
+  );
+  Assert.notEqual(
+    gZenWorkspaces.activeWorkspace,
+    space.uuid,
+    "We should have left the moved space"
+  );
+  await switchToExistingSpace(originalWorkspace);
+  Services.prefs.clearUserPref(REGISTRY_PREFIX + OTHER_PROFILE_ID);
+  Services.prefs.clearUserPref(HANDOFF_PREFIX + OTHER_PROFILE_ID);
+});
+
+add_task(async function test_cancel_pending_move() {
+  const { space } = await createSpace("ZenX Cancelled");
+  await ZenXProfileSpaces.moveSpaceToProfile(
+    window,
+    space.uuid,
+    OTHER_PROFILE_ID
+  );
+  Assert.ok(
+    ZenXProfileSpaces.getPendingMoves()[space.uuid],
+    "The move should be pending"
+  );
+
+  ZenXProfileSpaces.cancelPendingMove(space.uuid);
+  Assert.ok(
+    !ZenXProfileSpaces.getPendingMoves()[space.uuid],
+    "The move should be cancelled"
+  );
+  Assert.ok(
+    !Services.prefs.prefHasUserValue(HANDOFF_PREFIX + OTHER_PROFILE_ID),
+    "The handoff should be withdrawn"
+  );
+  Assert.ok(
+    gZenWorkspaces.getWorkspaceFromId(space.uuid),
+    "The space should stay here"
+  );
+});

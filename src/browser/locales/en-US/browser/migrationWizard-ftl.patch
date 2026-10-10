@@ -1,0 +1,12 @@
+diff --git a/browser/locales/en-US/browser/migrationWizard.ftl b/browser/locales/en-US/browser/migrationWizard.ftl
+index 8341f95a6fe46c0fb743fc5b6d7f944aebedc25b..475cf13de859c20cca0ce328b49770f61c75e523 100644
+--- a/browser/locales/en-US/browser/migrationWizard.ftl
++++ b/browser/locales/en-US/browser/migrationWizard.ftl
+@@ -44,6 +44,7 @@ migration-wizard-migrator-display-name-opera = Opera
+ migration-wizard-migrator-display-name-opera-gx = Opera GX
+ migration-wizard-migrator-display-name-safari = Safari
+ migration-wizard-migrator-display-name-vivaldi = Vivaldi
++migration-wizard-migrator-display-name-arc = Arc
+ 
+ migration-source-name-ie = Internet Explorer
+ migration-source-name-edge = Microsoft Edge

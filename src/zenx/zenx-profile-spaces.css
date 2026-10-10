@@ -1,0 +1,52 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/* With spaces in other profiles the switcher is needed even when this profile
+ * has a single space. */
+:root[zenx-has-remote-spaces] #zen-workspaces-button[dont-show="true"] {
+  display: flex !important;
+}
+
+#zen-workspaces-button {
+  & .zenx-remote-spaces-separator {
+    flex-shrink: 0;
+    align-self: center;
+    width: 1px;
+    height: 14px;
+    margin-inline: 2px;
+    background: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
+  }
+
+  & toolbarbutton.zenx-remote-space {
+    flex-shrink: 0;
+
+    & .zenx-remote-space-avatar {
+      pointer-events: none;
+      position: absolute;
+      inset-inline-end: 2px;
+      inset-block-end: 2px;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--zenx-profile-color, light-dark(#fff, #333));
+      -moz-context-properties: fill, stroke;
+      fill: currentColor;
+      stroke: currentColor;
+      outline: 1px solid light-dark(rgba(0, 0, 0, 0.15), rgba(255, 255, 255, 0.2));
+    }
+  }
+
+  /* A space sent to another profile and not adopted there yet. */
+  & toolbarbutton[zenx-moving] {
+    opacity: 0.35;
+  }
+}
+
+/* Collapsed sidebar: the switcher is vertical. */
+:root:not([zen-sidebar-expanded="true"]) #zen-workspaces-button .zenx-remote-spaces-separator {
+  width: 14px;
+  height: 1px;
+  margin-inline: 0;
+  margin-block: 2px;
+}

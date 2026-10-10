@@ -50,8 +50,9 @@
   value: 6
   condition: "defined(MOZILLA_OFFICIAL)"
 
+# ZenX: spaces can be bound to Firefox profiles (src/zenx).
 - name: browser.profiles.enabled
-  value: false
+  value: true
 
 - name: browser.tabs.groups.enabled
   value: false

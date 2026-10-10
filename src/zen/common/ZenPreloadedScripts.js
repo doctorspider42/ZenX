@@ -29,6 +29,8 @@
     "chrome://browser/content/zen-components/ZenLiveFoldersUI.mjs",
     "chrome://browser/content/zen-components/ZenDownloadAnimation.mjs",
     "resource:///modules/zen/share/ZenShareManager.mjs",
+    // ZenX
+    "resource:///modules/zenx/ZenXProfileSpacesUI.mjs",
   ];
 
   for (let script of scripts) {

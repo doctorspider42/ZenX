@@ -1,0 +1,22 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# ZenX additions on top of Zen. Kept out of src/zen so upstream merges
+# rarely touch them.
+
+EXTRA_JS_MODULES.zenx += [
+    "ZenXProfileSpaces.sys.mjs",
+    "ZenXProfileSpacesUI.mjs",
+]
+
+EXTRA_JS_MODULES.zenx.arc += [
+    "arc/ZenXArcImporter.sys.mjs",
+    "arc/ZenXArcProfileMigrator.sys.mjs",
+    "arc/ZenXArcSidebar.sys.mjs",
+]
+
+JAR_MANIFESTS += ["jar.mn"]
+
+BROWSER_CHROME_MANIFESTS += ["tests/browser.toml"]
+XPCSHELL_TESTS_MANIFESTS += ["tests/unit/xpcshell.toml"]

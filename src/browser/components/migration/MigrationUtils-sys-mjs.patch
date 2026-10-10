@@ -1,0 +1,25 @@
+diff --git a/browser/components/migration/MigrationUtils.sys.mjs b/browser/components/migration/MigrationUtils.sys.mjs
+index a05920b847121a52ec1adba684a39fa5c95a3f43..909fe4dc60cf0f95d7dc769170d3c1d8515da413 100644
+--- a/browser/components/migration/MigrationUtils.sys.mjs
++++ b/browser/components/migration/MigrationUtils.sys.mjs
+@@ -117,6 +117,12 @@ const MIGRATOR_MODULES = Object.freeze({
+     platforms: ["macosx", "win"],
+   },
+ 
++  // ZenX: Arc spaces, pinned tabs and favorites (src/zenx/arc).
++  ArcProfileMigrator: {
++    moduleURI: "resource:///modules/zenx/arc/ZenXArcProfileMigrator.sys.mjs",
++    platforms: ["macosx"],
++  },
++
+   InternalTestingProfileMigrator: {
+     moduleURI: "resource:///modules/InternalTestingProfileMigrator.sys.mjs",
+     platforms: ["linux", "macosx", "win"],
+@@ -513,6 +519,7 @@ class MigrationUtils {
+       Nightly: "firefox",
+       Opera: "opera",
+       Vivaldi: "vivaldi",
++      Arc: "arc",
+       "Opera GX": "opera-gx",
+       "Brave Web Browser": "brave", // Windows, Linux
+       Brave: "brave", // OS X
