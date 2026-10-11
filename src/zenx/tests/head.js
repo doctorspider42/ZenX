@@ -13,7 +13,7 @@ const { sinon } = ChromeUtils.importESModule(
 const { SelectableProfileService } = ChromeUtils.importESModule(
   "resource:///modules/profiles/SelectableProfileService.sys.mjs"
 );
-const { ZenXProfileSpaces, REGISTRY_PREFIX, HANDOFF_PREFIX } =
+const { ZenXProfileSpaces, REGISTRY_PREFIX, HANDOFF_PREFIX, ORDER_PREF } =
   ChromeUtils.importESModule(
     "resource:///modules/zenx/ZenXProfileSpaces.sys.mjs"
   );

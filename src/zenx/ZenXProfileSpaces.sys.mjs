@@ -37,6 +37,9 @@ ChromeUtils.defineESModuleGetters(lazy, {
 const PREF_BRANCH = "zenx.profile-spaces.";
 export const REGISTRY_PREFIX = `${PREF_BRANCH}registry.`;
 export const HANDOFF_PREFIX = `${PREF_BRANCH}handoff.`;
+// Shared: one order of all spaces of all profiles, so every profile's
+// switcher shows them the same way. JSON array of space uuids.
+export const ORDER_PREF = `${PREF_BRANCH}order`;
 // Local to this profile: spaces we sent away and still own until the target
 // confirms it adopted them. { [spaceUuid]: { target, handoffId, at } }
 const PENDING_MOVES_PREF = `${PREF_BRANCH}pending-moves`;
@@ -178,6 +181,8 @@ class nsZenXProfileSpaces {
       case "nsPref:changed":
         if (aData.startsWith(REGISTRY_PREFIX)) {
           this.#onRegistryChanged();
+        } else if (aData === ORDER_PREF) {
+          this.#notifyListeners();
         } else if (
           this.currentProfileId !== null &&
           aData === HANDOFF_PREFIX + this.currentProfileId
@@ -340,6 +345,63 @@ class nsZenXProfileSpaces {
   #onRegistryChanged() {
     this.#settlePendingMoves();
     this.#notifyListeners();
+  }
+
+  // Mark: order
+
+  /**
+   * The shared order applied to the spaces present now. Spaces it doesn't
+   * know yet keep their place from `aFallbackOrder`, at the end.
+   *
+   * @param {Array<string>} aFallbackOrder uuids of every space shown
+   * @returns {Array<string>}
+   */
+  orderSpaces(aFallbackOrder) {
+    const present = new Set(aFallbackOrder);
+    const ordered = readJSONPref(ORDER_PREF, []).filter(uuid =>
+      present.has(uuid)
+    );
+    const known = new Set(ordered);
+    for (const uuid of aFallbackOrder) {
+      if (!known.has(uuid)) {
+        ordered.push(uuid);
+      }
+    }
+    return ordered;
+  }
+
+  /**
+   * Stores the shared order. Spaces missing from `aOrder` (e.g. of a profile
+   * whose spaces aren't known yet) keep their stored place after it.
+   *
+   * @param {Array<string>} aOrder
+   */
+  setSpaceOrder(aOrder) {
+    if (!this.active) {
+      return;
+    }
+    const listed = new Set(aOrder);
+    const order = [
+      ...aOrder,
+      ...readJSONPref(ORDER_PREF, []).filter(uuid => !listed.has(uuid)),
+    ];
+    this.#setSharedPref(ORDER_PREF, toSharedJSON(order));
+  }
+
+  /**
+   * A moved space gets a new uuid in its new profile, keep its place.
+   *
+   * @param {string} aOldUuid
+   * @param {string} aNewUuid
+   */
+  #replaceInOrder(aOldUuid, aNewUuid) {
+    const order = readJSONPref(ORDER_PREF, []);
+    const index = order.indexOf(aOldUuid);
+    if (index === -1 || !this.active) {
+      return;
+    }
+    order[index] = aNewUuid;
+    this.#setSharedPref(ORDER_PREF, toSharedJSON(order));
   }
 
   // Mark: switching
@@ -509,6 +571,17 @@ class nsZenXProfileSpaces {
     if (!profile || profile.id === this.currentProfileId) {
       return false;
     }
+
+    // Remember where every space is before this one moves out, so it keeps
+    // its place: until now there may have been no shared order at all.
+    this.setSpaceOrder(
+      this.orderSpaces([
+        ...aWindow.gZenWorkspaces.getWorkspaces().map(space => space.uuid),
+        ...this.getRemoteSpaces().flatMap(({ spaces }) =>
+          spaces.map(space => space.uuid)
+        ),
+      ])
+    );
 
     const handoffId = Services.uuid.generateUUID().toString().slice(1, -1);
     const handoffPref = HANDOFF_PREFIX + profile.id;
@@ -758,6 +831,7 @@ class nsZenXProfileSpaces {
       throw new Error("Spaces are disabled in this window");
     }
     workspace.zenxMovedFrom = aItem.sourceUuid;
+    this.#replaceInOrder(aItem.sourceUuid, workspace.uuid);
     if (aItem.icon) {
       workspace.icon = aItem.icon;
     }

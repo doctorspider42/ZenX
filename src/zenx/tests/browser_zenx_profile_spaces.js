@@ -58,8 +58,10 @@ add_task(async function test_shows_and_opens_spaces_of_other_profiles() {
     "The switcher should stay visible"
   );
   Assert.ok(
-    !button.parentElement.lastElementChild.hasAttribute("zen-workspace-id"),
-    "Other profiles' spaces should come after this profile's spaces"
+    !document.querySelector(
+      "#zen-workspaces-button .zenx-remote-spaces-separator"
+    ),
+    "No separator: all spaces share one order"
   );
 
   const buttons = [
@@ -445,4 +447,73 @@ add_task(async function test_menubar_profiles_menu_stays_hidden() {
     () => menu.hidden,
     "ZenX hides it again (the native macOS menu bar ignores CSS)"
   );
+});
+
+add_task(async function test_one_order_for_all_profiles() {
+  const { space } = await createSpace("ZenX Ordered");
+  const local = gZenWorkspaces.getWorkspaces().map(s => s.uuid);
+  const updated = waitForRemoteSpacesUpdate();
+  Services.prefs.setStringPref(
+    REGISTRY_PREFIX + OTHER_PROFILE_ID,
+    JSON.stringify({
+      v: 1,
+      spaces: [{ uuid: "remote-ordered", name: "Remote", icon: "🛰" }],
+    })
+  );
+  await updated;
+  const shown = () =>
+    [...document.querySelectorAll("#zen-workspaces-button toolbarbutton")].map(
+      b => b.getAttribute("zen-workspace-id") || b.getAttribute("zenx-space-id")
+    );
+
+  // The shared order puts the other profile's space first, then ours.
+  const wanted = ["remote-ordered", ...local.slice().reverse()];
+  const reordered = waitForRemoteSpacesUpdate();
+  Services.prefs.setStringPref(ORDER_PREF, JSON.stringify(wanted));
+  await reordered;
+  Assert.deepEqual(
+    shown(),
+    wanted,
+    "The switcher follows the order shared by all profiles"
+  );
+
+  // A space moved to another profile keeps its place.
+  const handoffPref = HANDOFF_PREFIX + CURRENT_PROFILE_ID;
+  Services.prefs.setStringPref(
+    handoffPref,
+    JSON.stringify({
+      "order-1": {
+        v: 1,
+        id: "order-1",
+        from: OTHER_PROFILE_ID,
+        at: Date.now(),
+        space: {
+          type: "space",
+          name: "Arrived",
+          items: [],
+          sourceUuid: "remote-ordered",
+        },
+      },
+    })
+  );
+  let arrived;
+  await TestUtils.waitForCondition(() => {
+    arrived = gZenWorkspaces
+      .getWorkspaces()
+      .find(s => s.zenxMovedFrom === "remote-ordered");
+    return arrived;
+  }, "The space arrives");
+  registerCleanupFunction(async () => {
+    if (gZenWorkspaces.getWorkspaceFromId(arrived.uuid)) {
+      await switchToExistingSpace(space.uuid);
+      await gZenWorkspaces.removeWorkspace(arrived.uuid);
+    }
+  });
+  Assert.equal(
+    JSON.parse(Services.prefs.getStringPref(ORDER_PREF))[0],
+    arrived.uuid,
+    "The moved space takes the place of its old uuid in the shared order"
+  );
+  Services.prefs.clearUserPref(REGISTRY_PREFIX + OTHER_PROFILE_ID);
+  Services.prefs.clearUserPref(ORDER_PREF);
 });

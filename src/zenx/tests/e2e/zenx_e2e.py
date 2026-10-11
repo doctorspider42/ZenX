@@ -270,6 +270,16 @@ const Z = {
       };
     });
   },
+  // The switcher as shown: names in order, this profile's and others'.
+  switcher(win = Z.win()) {
+    const names = new Map(win.gZenWorkspaces.getWorkspaces().map(s => [s.uuid, s.name]));
+    for (const { spaces } of Z.zenx().getRemoteSpaces()) {
+      for (const s of spaces) names.set(s.uuid, s.name);
+    }
+    return [...win.document.querySelectorAll("#zen-workspaces-button toolbarbutton")]
+      .map(b => b.getAttribute("zen-workspace-id") || b.getAttribute("zenx-space-id"))
+      .map(uuid => names.get(uuid) ?? "?");
+  },
   essentials(win = Z.win()) {
     return win.gZenWorkspaces.allStoredTabs.filter(t => t.hasAttribute("zen-essential")).length;
   },
@@ -280,8 +290,17 @@ const Z = {
     const button = doc.querySelector(`#zen-workspaces-button toolbarbutton[zen-workspace-id="${uuid}"]`)
       ?? doc.querySelector(`zen-workspace[id="${uuid}"]`);
     const shown = new Promise(r => menu.addEventListener("popupshown", r, { once: true }));
-    menu.openPopup(button, "after_start", 0, 0, true, false, null);
+    // Like a right click on that space: the menu must know which space it is
+    // for (triggerNode), or actions apply to the active space instead.
+    const rect = button.getBoundingClientRect();
+    const event = new win.MouseEvent("contextmenu", { bubbles: true, cancelable: true, view: win,
+      clientX: rect.x + rect.width / 2, clientY: rect.y + rect.height / 2, button: 2 });
+    button.dispatchEvent(event);
+    menu.openPopup(button, "after_start", 0, 0, true, false, event);
     await shown;
+    if (menu.triggerNode?.closest?.("[zen-workspace-id]")?.getAttribute("zen-workspace-id") !== uuid) {
+      throw new Error("space menu opened for the wrong space");
+    }
     return menu;
   },
   async closeMenu(menu) {
@@ -788,6 +807,7 @@ def scenario_new_profile_and_switching(env):
     import_arc(a)
     env.install_profile_launcher(a)
     work = [s for s in a.js("return Z.spaces();") if s["arc"]][0]
+    order_before = a.js("return Z.switcher();")
 
     # Set Profile > New Profile… on the Work space.
     a.js(
@@ -844,6 +864,58 @@ def scenario_new_profile_and_switching(env):
     check(
         not any(s["name"] == "Work" for s in a_state["spaces"]),
         "source closed its copy after adoption",
+    )
+    order_a = a.js(
+        'await Z.until(() => !Z.switcher().includes("?") && Z.switcher().includes("Work"), "switcher settled", 15000); return Z.switcher();'
+    )
+    order_b = b.js(
+        'await Z.until(() => !Z.switcher().includes("?") && Z.switcher().length > 1, "switcher settled", 15000); return Z.switcher();'
+    )
+    check(
+        order_a == order_before,
+        f"the moved space keeps its place: {order_before} -> {order_a}",
+    )
+    check(
+        order_a == order_b,
+        f"both profiles show spaces in the same order: A={order_a} B={order_b}",
+    )
+
+    # Drag A's first space to the end with the mouse; B follows.
+    dragged = a.js(
+        """
+        const win = await Z.ready();
+        const doc = win.document;
+        const buttons = [...doc.querySelectorAll("#zen-workspaces-button toolbarbutton")];
+        const from = buttons.find(b => b.hasAttribute("zen-workspace-id"));
+        const to = buttons.at(-1);
+        const a = from.getBoundingClientRect(), b = to.getBoundingClientRect();
+        const y = a.y + a.height / 2;
+        const mouse = (target, type, x, buttonsDown) =>
+          target.dispatchEvent(new win.MouseEvent(type, { bubbles: true, cancelable: true, view: win, clientX: x, clientY: y, button: 0, buttons: buttonsDown }));
+        mouse(from, "mousedown", a.x + a.width / 2, 1);
+        for (let x = a.x + a.width / 2; x <= b.x + b.width * 0.9; x += 4) {
+          mouse(doc, "mousemove", x, 1);
+          await Z.sleep(5);
+        }
+        mouse(doc, "mouseup", b.x + b.width * 0.9, 0);
+        await Z.sleep(1500);
+        return Z.switcher();
+        """
+    )
+    check(
+        dragged != order_a and dragged[-1] == order_a[0],
+        f"dragging reorders the switcher: {order_a} -> {dragged}",
+    )
+    order_b = b.js(
+        """
+        const [want] = args;
+        await Z.until(() => JSON.stringify(Z.switcher()) === JSON.stringify(want), "B follows the new order", 15000);
+        return Z.switcher();
+        """,
+        dragged,
+    )
+    check(
+        order_b == dragged, f"the other profile shows the dragged order too: {order_b}"
     )
     remote_names = [sp["name"] for g in a_state["remote"] for sp in g["spaces"]]
     check(

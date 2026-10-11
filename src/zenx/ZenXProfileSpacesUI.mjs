@@ -48,15 +48,15 @@ class nsZenXProfileSpacesUI {
     document
       .getElementById("zenWorkspaceMoreActions")
       ?.addEventListener("popupshowing", this);
-    // Dragging a space past ours can leave it after them when the drop
-    // position is rejected, put ours back at the end.
-    document
-      .getElementById("zen-workspaces-button")
-      ?.addEventListener("mousedown", () =>
-        document.addEventListener("mouseup", () => setTimeout(this.#listener), {
-          once: true,
-        })
-      );
+    // Capturing on the window runs before Zen's own drop handling.
+    const switcher = document.getElementById("zen-workspaces-button");
+    switcher?.addEventListener("mousedown", () =>
+      window.addEventListener(
+        "mouseup",
+        () => this.#onSwitcherDragEnd(switcher),
+        { capture: true, once: true }
+      )
+    );
 
     ZenXProfileSpaces.addListener(this.#listener);
     await ZenXProfileSpaces.init();
@@ -120,17 +120,82 @@ class nsZenXProfileSpacesUI {
       ROOT_HAS_REMOTE_ATTR,
       !!groups.length
     );
+    const remoteButtons = new Map();
     for (const { profile, spaces } of groups) {
-      const separator = document.createXULElement("box");
-      separator.className = "zenx-remote-spaces-separator";
-      switcher.appendChild(separator);
       for (const space of spaces) {
-        switcher.appendChild(this.#createRemoteSpaceButton(profile, space));
+        remoteButtons.set(
+          space.uuid,
+          this.#createRemoteSpaceButton(profile, space)
+        );
       }
+    }
+    if (remoteButtons.size) {
+      // One order for the spaces of every profile, the same in each window.
+      const localButtons = new Map(
+        [...switcher.querySelectorAll("toolbarbutton[zen-workspace-id]")].map(
+          button => [button.getAttribute("zen-workspace-id"), button]
+        )
+      );
+      const order = ZenXProfileSpaces.orderSpaces([
+        ...localButtons.keys(),
+        ...remoteButtons.keys(),
+      ]);
+      for (const uuid of order) {
+        const button = localButtons.get(uuid) ?? remoteButtons.get(uuid);
+        if (button) {
+          switcher.appendChild(button);
+        }
+      }
+      ZenXProfileSpaces.setSpaceOrder(order);
     }
     // Zen sizes every button of the switcher (and switches to compact dots
     // when they don't fit); ours have to be part of that or they overlap.
     gZenWorkspaces.onWindowResize();
+  }
+
+  /**
+   * Space uuids in the order the switcher shows them.
+   *
+   * @param {Element} switcher
+   */
+  #switcherOrder(switcher) {
+    return [...switcher.querySelectorAll("toolbarbutton")]
+      .map(
+        button =>
+          button.getAttribute("zen-workspace-id") ||
+          button.getAttribute("zenx-space-id")
+      )
+      .filter(Boolean);
+  }
+
+  /**
+   * A space dragged in the switcher: store the order shown, before Zen
+   * handles the drop (it only knows this profile's spaces), then make Zen's
+   * own order of this profile's spaces match it.
+   *
+   * @param {Element} switcher
+   */
+  #onSwitcherDragEnd(switcher) {
+    if (
+      !switcher.hasAttribute("reorder-mode") ||
+      !switcher.querySelector(".zenx-remote-space")
+    ) {
+      return;
+    }
+    const order = this.#switcherOrder(switcher);
+    ZenXProfileSpaces.setSpaceOrder(order);
+    setTimeout(async () => {
+      const local = order.filter(uuid =>
+        gZenWorkspaces.getWorkspaceFromId(uuid)
+      );
+      for (let i = 0; i < local.length; i++) {
+        const current = gZenWorkspaces.getWorkspaces().map(s => s.uuid);
+        if (current[i] !== local[i]) {
+          await gZenWorkspaces.reorderWorkspace(local[i], i);
+        }
+      }
+      this.#update();
+    });
   }
 
   #createRemoteSpaceButton(profile, space) {
