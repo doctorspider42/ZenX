@@ -20,7 +20,7 @@ ZenX merges `zen-browser/desktop` into `dev` every day (`zenx-upstream-sync` ski
 | Feature code | `src/zenx/<feature>/` or `src/zenx/ZenX<Feature>.sys.mjs` (process-wide) / `ZenX<Feature>UI.mjs` (per window) |
 | Registration | `src/zenx/moz.build` (`EXTRA_JS_MODULES.zenx[.<sub>]`), `src/zenx/jar.mn` (CSS/SVG → `chrome://browser/content/zenx/`) |
 | Loading a window module | one line in the `scripts` array of `src/zen/common/ZenPreloadedScripts.js` (marked `// ZenX`) |
-| Prefs | `prefs/zenx/<feature>.yaml`, names `zenx.<feature>.*`, include an `enabled` kill switch |
+| Prefs | `prefs/zenx/<feature>.yaml`, names `zenx.<feature>.*`, include an `enabled` kill switch. Firefox features often have their own gate pref too (e.g. a migrator is only listed when `browser.migrate.<key>.enabled` is true) - test through the real entry point, not just the module |
 | Strings | `locales/en-US/browser/browser/zenx-<feature>.ftl` (+ `locales/pl/...`), ids `zenx-*`, load with `document.l10n.addResourceIds`; after adding a file run `python3 scripts/update_en_US_packs.py` |
 | Settings UI | Zen's settings live in `src/browser/components/preferences/zen-settings.js` + `*.inc.xhtml`: register the pref like the existing `zen.workspaces.*` ones and add a `<checkbox preference=...>` - both are Zen files, so keep it to a marked hook and list it in `docs/zenx.md`; strings for settings go in an ftl the preferences page loads |
 | Styles | `src/zenx/zenx-<feature>.css`, loaded with `windowUtils.loadSheetUsingURIString(url, AUTHOR_SHEET)` |

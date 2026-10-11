@@ -14,6 +14,20 @@ const { importArcIntoWindow } = ChromeUtils.importESModule(
   "resource:///modules/zenx/arc/ZenXArcImporter.sys.mjs"
 );
 
+add_task(async function test_arc_listed_in_import_wizard() {
+  Assert.ok(
+    Services.prefs.getBoolPref("browser.migrate.arc.enabled", false),
+    "The import wizard only lists migrators whose pref is enabled"
+  );
+  const { MigrationUtils } = ChromeUtils.importESModule(
+    "resource:///modules/MigrationUtils.sys.mjs"
+  );
+  Assert.ok(
+    MigrationUtils.availableMigratorKeys.includes("arc"),
+    "The Arc migrator is registered"
+  );
+});
+
 async function loadFixture() {
   const path = getTestFilePath("unit/arc-sidebar-fixture.json");
   return parseArcSidebar(await IOUtils.readJSON(path));

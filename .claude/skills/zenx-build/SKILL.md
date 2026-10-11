@@ -12,7 +12,8 @@ Run everything from the repo root unless noted. `engine/` is generated (see `zen
 | You changed | Command | Time (M3 Pro) |
 |---|---|---|
 | JS/MJS/CSS/FTL/SVG files in `src/zen`, `src/zenx` (already symlinked into engine) | `cd engine && ./mach build faster` | ~1 min |
-| a `.yaml` pref or a `.patch` | `npm run import`, then `npm run build` (incremental) | 2-10 min |
+| a `.yaml` pref | `npm run ffprefs`, then `./mach build faster` | ~1 min |
+| a `.patch` | `npm run import`, then `npm run build` (incremental) | 2-10 min |
 | a new or changed `.ftl` | `python3 scripts/update_en_US_packs.py`, then `./mach build faster` | ~1 min |
 | `moz.build`, `jar.mn`, C++, Rust | `npm run build` (incremental) | 3-15 min |
 | added a **new file** under `src/` | `npm run import` first (engine files are per-file symlinks, a new file has none yet), then build | +1 min |
