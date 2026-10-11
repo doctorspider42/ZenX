@@ -28,6 +28,7 @@ Zen files that ZenX changes today:
 | `src/zen/common/ZenPreloadedScripts.js` | loads `ZenXProfileSpacesUI.mjs` in browser windows |
 | `src/zen/zen.globals.mjs` | lint global `gZenXProfileSpaces` |
 | `src/zen/share/ZenShareManager.mjs` | public `importSpace(item)`, which returns the new space |
+| `src/zen/folders/ZenFolders.mjs` | bug fix: a folder's empty tab belongs to the folder's space. Without it, a folder created in a space that isn't active came back in the active space after a restart. Worth sending upstream. |
 | `prefs/firefox/browser.yaml` | `browser.profiles.enabled = true` |
 | `src/browser/components/migration/MigrationUtils-sys-mjs.patch` (new Firefox patch) | registers the Arc migrator |
 | `src/browser/locales/en-US/browser/migrationWizard-ftl.patch` (new Firefox patch) | the "Arc" name in the import wizard |
@@ -71,3 +72,30 @@ In the spirit of Zen's own importers, **Arc** appears in the import wizard on ma
 - Not imported: easels, notes and other Arc-only items, `arc://` pages, Arc's SF Symbol space icons, and Arc's Chromium bookmarks if Arc has none (this is the usual case).
 
 The wizard lists Arc because `prefs/zenx/arc.yaml` sets `browser.migrate.arc.enabled`. The code is in `src/zenx/arc/`. `ZenXArcSidebar.sys.mjs` is a pure parser of `~/Library/Application Support/Arc/StorableSidebar.json`. `ZenXArcImporter.sys.mjs` creates the result in a window, reusing `gZenShareManager.importSpace`. `ZenXArcProfileMigrator.sys.mjs` is the wizard entry and subclasses `ChromeProfileMigrator`. Tests: `src/zenx/tests/unit/test_zenx_arc_sidebar.js` and `src/zenx/tests/browser_zenx_arc_import.js`, which use a synthetic fixture.
+
+## End-to-end tests
+
+`src/zenx/tests/e2e/zenx_e2e.py` drives the real built app over Marionette, the way a user runs it:
+
+- Normal start, without `--profile`. Each scenario gets its own profile root and remoting name through a test `application.ini` passed with `-app`, so it never touches or talks to your own ZenX.
+- Zen's production startup and animations, not the mochitest testing mode.
+- Quits like Cmd+Q, and restarts.
+- Controls several profile processes at once.
+- Uses synthetic Arc data (`ZENX_ARC_DATA_DIR`).
+
+Scenarios:
+
+- first run
+- import into an empty profile, then two restarts
+- import with existing data, and importing twice
+- New Profile from a space, switching between profiles, and moving a space to an existing profile
+- deleting a profile
+- restarting with two profiles, with Polish characters and emoji
+
+Run them after a build:
+
+```bash
+cd engine && ./mach python zenx/tests/e2e/zenx_e2e.py
+```
+
+Add `-k <name>` to run one scenario and `--headed` to watch the windows.

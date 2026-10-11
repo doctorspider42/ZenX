@@ -65,7 +65,9 @@ npm test -- spaces                           # same via scripts/run_tests.py (Ze
 ./mach test zenx/tests/browser_zenx_arc_import.js --headless
 ```
 
-xpcshell manifests that import `resource:///modules/...` (browser modules) need `firefox-appdir = "browser"` under `[DEFAULT]`, otherwise the module is "missing" and xpcshell crashes. New test folders must be listed in a `moz.build` (`BROWSER_CHROME_MANIFESTS` / `XPCSHELL_TESTS_MANIFESTS`) and need `npm run build` once before mach finds them. Pure logic → xpcshell (fast). Anything needing `gBrowser`/`gZenWorkspaces` → mochitest. Use sinon (`resource://testing-common/Sinon.sys.mjs`) to fake Firefox services such as `SelectableProfileService`.
+xpcshell manifests that import `resource:///modules/...` (browser modules) need `firefox-appdir = "browser"` under `[DEFAULT]`, otherwise the module is "missing" and xpcshell crashes. **End-to-end (real app):** `./mach python zenx/tests/e2e/zenx_e2e.py [-k name] [--headed]`. It starts the real build the way a user does, with an isolated profile root through `-app`. Run it for anything touching profiles, startup, session restore, importers or multi-window/multi-process behavior; mochitests can't see those bugs, because they use `--profile`, a testing mode without animations, and faked services. On macOS `$HOME` doesn't isolate app data (FSFindFolder). Never launch the app in a way that could use the user's real profiles.
+
+New test folders must be listed in a `moz.build` (`BROWSER_CHROME_MANIFESTS` / `XPCSHELL_TESTS_MANIFESTS`) and need `npm run build` once before mach finds them. Pure logic → xpcshell (fast). Anything needing `gBrowser`/`gZenWorkspaces` → mochitest. Use sinon (`resource://testing-common/Sinon.sys.mjs`) to fake Firefox services such as `SelectableProfileService`.
 
 ## Lint / format
 

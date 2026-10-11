@@ -41,6 +41,7 @@ Hooks into Zen files carry a `ZenX` comment and are listed in the table in `docs
 
 1. `cd engine && ./mach build faster` (or `npm run build` if you touched moz.build/jar.mn/patches - see `zenx-build`).
 2. Write/extend tests and run them: `./mach test zenx/tests`. Fake Firefox services with sinon instead of needing real profiles.
+   For user flows (profiles, import, restart, first run), also add a scenario to `zenx/tests/e2e/zenx_e2e.py` and run it. Most real bugs so far only showed up there: a fresh install without a profile group, sessions after a Cmd+Q restart, folders in inactive spaces.
 3. `./mach lint zenx` (and `zen` if you touched it).
 4. If possible run the browser (`npm start`) and click through the feature; for UI changes take a screenshot.
 

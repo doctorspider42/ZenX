@@ -18,6 +18,11 @@ ChromeUtils.defineESModuleGetters(lazy, {
 
 /** Path of Arc's sidebar file, next to its Chromium "User Data" folder. */
 export function getArcSidebarPath() {
+  // End-to-end tests point the importer at a synthetic Arc folder.
+  const override = Services.env.get("ZENX_ARC_DATA_DIR");
+  if (override) {
+    return PathUtils.join(override, "StorableSidebar.json");
+  }
   if (AppConstants.platform !== "macosx") {
     return null;
   }

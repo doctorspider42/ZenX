@@ -322,7 +322,7 @@ class nsZenXProfileSpacesUI {
             ? null
             : ZenXProfileSpaces.getProfiles().find(p => p.id === profileId)
                 ?.name;
-        if (await this.#confirmMove(spaceId, profileName)) {
+        if (await this.confirmMove(spaceId, profileName)) {
           await ZenXProfileSpaces.moveSpaceToProfile(
             window,
             spaceId,
@@ -334,7 +334,14 @@ class nsZenXProfileSpacesUI {
     }
   }
 
-  async #confirmMove(spaceId, profileName) {
+  /**
+   * Asks before moving a space. Public so end-to-end tests can answer it.
+   *
+   * @param {string} spaceId
+   * @param {?string} profileName null when a new profile is created
+   * @returns {Promise<boolean>}
+   */
+  async confirmMove(spaceId, profileName) {
     const space = gZenWorkspaces.getWorkspaceFromId(spaceId);
     if (!space) {
       return false;
