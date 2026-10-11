@@ -18,22 +18,20 @@
     background: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
   }
 
+  /* Spaces of other profiles: a bar in the profile's color under the icon. */
   & toolbarbutton.zenx-remote-space {
     flex-shrink: 0;
 
-    & .zenx-remote-space-avatar {
+    &::after {
+      content: "";
       pointer-events: none;
       position: absolute;
-      inset-inline-end: 2px;
-      inset-block-end: 2px;
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--zenx-profile-color, light-dark(#fff, #333));
-      -moz-context-properties: fill, stroke;
-      fill: currentColor;
-      stroke: currentColor;
-      outline: 1px solid light-dark(rgba(0, 0, 0, 0.15), rgba(255, 255, 255, 0.2));
+      inset-inline: 30%;
+      inset-block-end: 3px;
+      height: 2px;
+      border-radius: 1px;
+      background: var(--zenx-profile-color, currentColor);
+      opacity: 0.8;
     }
   }
 

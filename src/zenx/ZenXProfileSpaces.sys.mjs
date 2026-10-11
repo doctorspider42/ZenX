@@ -44,6 +44,8 @@ const PENDING_MOVES_PREF = `${PREF_BRANCH}pending-moves`;
 // delivered twice is not imported twice.
 const IMPORTED_HANDOFFS_PREF = `${PREF_BRANCH}imported-handoffs`;
 const ENABLED_PREF = `${PREF_BRANCH}enabled`;
+// Seeded into profiles ZenX creates: open the profile editor on first start.
+export const OPEN_PROFILE_EDITOR_PREF = `${PREF_BRANCH}open-profile-editor`;
 
 const FORMAT_VERSION = 1;
 const PUBLISH_DELAY_MS = 500;
@@ -52,6 +54,21 @@ const MAX_IMPORTED_HANDOFFS = 50;
 const NON_TRANSFERABLE_URL_RE = /^(about:blank|moz-extension:|blob:|data:)/;
 // Space icons that mean the same thing in every profile.
 const PORTABLE_ICON_RE = /^(chrome:|data:)/;
+
+/**
+ * JSON with every non-ASCII character escaped. SelectableProfileService copies
+ * shared prefs between profiles with getCharPref/setCharPref, which mangles
+ * UTF-8 (emoji icons, non-English tab titles), so shared values stay ASCII.
+ *
+ * @param {any} value
+ * @returns {string}
+ */
+export function toSharedJSON(value) {
+  return JSON.stringify(value).replace(
+    /[\u007f-\uffff]/g,
+    c => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")
+  );
+}
 
 function readJSONPref(name, fallback) {
   try {
@@ -115,6 +132,9 @@ class nsZenXProfileSpaces {
       await this.#sps.init();
     }
     await this.#refreshProfiles();
+    if (this.active) {
+      await this.disableStartupProfileSelector();
+    }
     this.#notifyListeners();
   }
 
@@ -277,7 +297,7 @@ class nsZenXProfileSpaces {
     });
     this.#setSharedPref(
       REGISTRY_PREFIX + this.currentProfileId,
-      JSON.stringify({ v: FORMAT_VERSION, spaces })
+      toSharedJSON({ v: FORMAT_VERSION, spaces })
     );
   }
 
@@ -469,12 +489,8 @@ class nsZenXProfileSpaces {
     }
 
     let profile;
-    let isNewProfile = false;
     if (aTargetProfileId === "new") {
-      // Also sets up the profile group on the first use.
-      profile = await this.#sps.createNewProfile(false);
-      isNewProfile = true;
-      await this.#refreshProfiles();
+      profile = await this.createProfile();
     } else {
       profile = this.#getProfile(aTargetProfileId);
     }
@@ -495,15 +511,58 @@ class nsZenXProfileSpaces {
     const pending = readJSONPref(PENDING_MOVES_PREF, {});
     pending[aSpaceUuid] = { target: profile.id, handoffId, at: Date.now() };
     Services.prefs.setStringPref(PENDING_MOVES_PREF, JSON.stringify(pending));
-    this.#setSharedPref(handoffPref, JSON.stringify(handoffs));
+    this.#setSharedPref(handoffPref, toSharedJSON(handoffs));
     // The source window shows the space as moving until it is adopted.
     this.#notifyListeners();
 
-    this.#sps.launchInstance(
-      profile,
-      isNewProfile ? ["about:newprofile"] : undefined
-    );
+    this.#sps.launchInstance(profile);
     return true;
+  }
+
+  /**
+   * Creates a profile for spaces: no Zen welcome screen or "updated" popup on
+   * its first start, and the profile editor (name, avatar, theme) opens
+   * instead of Firefox's new profile page, which Zen's startup hides.
+   *
+   * @returns {Promise<SelectableProfile>}
+   */
+  async createProfile() {
+    // Also sets up the profile group on the first use.
+    const profile = await this.#sps.createNewProfile(false);
+    const prefs = [
+      ["zen.welcome-screen.seen", true],
+      ["zen.updates.last-version", Services.appinfo.version],
+      ["zen.updates.last-build-id", Services.appinfo.appBuildID],
+      [OPEN_PROFILE_EDITOR_PREF, true],
+    ];
+    await IOUtils.writeUTF8(
+      PathUtils.join(profile.path, "prefs.js"),
+      prefs
+        .map(
+          ([name, value]) =>
+            `user_pref(${JSON.stringify(name)}, ${JSON.stringify(value)});\n`
+        )
+        .join(""),
+      { mode: "appendOrCreate" }
+    );
+    await this.disableStartupProfileSelector();
+    await this.#refreshProfiles();
+    return profile;
+  }
+
+  /**
+   * Firefox shows a profile picker at startup once a second profile exists.
+   * In ZenX profiles belong to spaces, so the app always starts in the last
+   * used profile and new profiles are made from a space's "Set Profile" menu.
+   */
+  async disableStartupProfileSelector() {
+    try {
+      if (this.#sps.groupToolkitProfile?.showProfileSelector) {
+        await this.#sps.setShowProfileSelectorWindow(false);
+      }
+    } catch (e) {
+      console.error("ZenX: could not turn off the startup profile picker", e);
+    }
   }
 
   /** Spaces of this profile waiting to be adopted by another profile. */
@@ -530,7 +589,7 @@ class nsZenXProfileSpaces {
       delete handoffs[move.handoffId];
       this.#setSharedPref(
         handoffPref,
-        Object.keys(handoffs).length ? JSON.stringify(handoffs) : null
+        Object.keys(handoffs).length ? toSharedJSON(handoffs) : null
       );
     }
     this.#notifyListeners();
@@ -631,7 +690,7 @@ class nsZenXProfileSpaces {
     );
     this.#setSharedPref(
       handoffPref,
-      Object.keys(handoffs).length ? JSON.stringify(handoffs) : null
+      Object.keys(handoffs).length ? toSharedJSON(handoffs) : null
     );
     // Publish right away, this is what lets the source drop its copy.
     this.#publishTask.disarm();

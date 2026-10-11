@@ -38,10 +38,13 @@ As in Arc, every space belongs to a profile. Extensions, history, cookies, login
 
 A Firefox profile is a separate process: Firefox cannot run two profiles in one process the way Chromium can. ZenX therefore builds on Firefox's own profile groups (`SelectableProfileService`):
 
-- **One switcher for every profile.** Each running profile publishes a summary of its spaces (uuid, name, icon) to the profile group as the shared pref `zenx.profile-spaces.registry.<profileId>`. The sidebar switcher shows this profile's spaces, then a divider, then the spaces of each other profile with that profile's avatar on them.
+- **One switcher for every profile.** Each running profile publishes a summary of its spaces (uuid, name, icon) to the profile group as the shared pref `zenx.profile-spaces.registry.<profileId>`. The sidebar switcher shows this profile's spaces, then a divider, then the spaces of each other profile, marked with a bar in that profile's color.
 - **Switching to another profile's space** brings that profile's window to the front on that space (`--space <uuid>`). If the profile isn't running, it is started.
 - **Space menu → Set Profile → profile / New Profile…** (as in Arc: every profile is listed, with the space's own one checked) sends the space to the chosen profile through `zenx.profile-spaces.handoff.<targetProfileId>`. The space's name, icon, theme, pinned and normal tabs, folders and split views all go with it. The target imports the space and publishes it with `movedFrom`. Only when this profile sees that does it close its own copy. Until then the space is shown faded, and the same menu has "Cancel Move".
 - Zen's own per-space "Set Profile" picker, which actually sets a **container**, is hidden from the space menu and the space creation form while profiles are on. Containers still work for tabs.
+- **New Profile…** creates the profile before it first starts. Zen's welcome screen and "updated" popup are skipped there, and the profile editor (`about:editprofile`: name, avatar, theme) opens on its first start.
+- Firefox's startup profile picker is turned off: ZenX starts in the last used profile, and new profiles are made from a space.
+- Values shared between profiles are ASCII-only JSON (`toSharedJSON`). Firefox copies shared prefs as bytes, which breaks emoji and non-English text.
 - Profiles themselves (creating, renaming, avatars, deleting) are managed in Firefox's profile menu in the app menu and at `about:profilemanager`.
 
 What does not move: essentials (they belong to the profile and container, not the space), and tabs of extension pages, `about:blank`, `blob:` and `data:` URLs. The confirmation dialog says how many tabs will be dropped.

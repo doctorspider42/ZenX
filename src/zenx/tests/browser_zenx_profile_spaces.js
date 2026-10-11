@@ -333,3 +333,69 @@ add_task(async function test_space_menu_set_profile_like_arc() {
   menu.hidePopup();
   await hidden;
 });
+
+add_task(async function test_shared_prefs_are_ascii() {
+  const { space } = await createSpace("Zażółć 🎉");
+  space.icon = "🤡";
+  gZenWorkspaces.saveWorkspace(space);
+  const registryPref = REGISTRY_PREFIX + CURRENT_PROFILE_ID;
+  await TestUtils.waitForCondition(
+    () =>
+      readPrefJSON(registryPref)?.spaces?.some(
+        s => s.uuid === space.uuid && s.icon
+      ),
+    "The space and its icon are published"
+  );
+  const raw = Services.prefs.getStringPref(registryPref);
+  Assert.ok(
+    /^[ -~]*$/.test(raw),
+    "Shared prefs stay ASCII, Firefox copies them between profiles as bytes"
+  );
+  const published = readPrefJSON(registryPref).spaces.find(
+    s => s.uuid === space.uuid
+  );
+  Assert.equal(published.name, "Zażółć 🎉", "Names survive the escaping");
+  Assert.equal(published.icon, "🤡", "Emoji icons survive the escaping");
+});
+
+add_task(async function test_new_profile_is_prepared() {
+  const dir = await IOUtils.createUniqueDirectory(
+    PathUtils.tempDir,
+    "zenx-new-profile"
+  );
+  registerCleanupFunction(() => IOUtils.remove(dir, { recursive: true }));
+  await IOUtils.writeUTF8(
+    PathUtils.join(dir, "prefs.js"),
+    'user_pref("browser.profiles.enabled", true);\n'
+  );
+  const sandbox = sinon.createSandbox();
+  registerCleanupFunction(() => sandbox.restore());
+  sandbox
+    .stub(SelectableProfileService, "createNewProfile")
+    .resolves({ ...fakeProfile(3, "New"), path: dir });
+  sandbox
+    .stub(SelectableProfileService, "groupToolkitProfile")
+    .get(() => ({ showProfileSelector: true }));
+  const selector = sandbox
+    .stub(SelectableProfileService, "setShowProfileSelectorWindow")
+    .resolves();
+
+  const profile = await ZenXProfileSpaces.createProfile();
+  Assert.equal(profile.path, dir);
+  const prefs = await IOUtils.readUTF8(PathUtils.join(dir, "prefs.js"));
+  Assert.ok(
+    prefs.includes('user_pref("browser.profiles.enabled", true);'),
+    "Firefox's own prefs are kept"
+  );
+  for (const expected of [
+    'user_pref("zen.welcome-screen.seen", true);',
+    `user_pref("zen.updates.last-version", ${JSON.stringify(Services.appinfo.version)});`,
+    'user_pref("zenx.profile-spaces.open-profile-editor", true);',
+  ]) {
+    Assert.ok(prefs.includes(expected), `New profile gets ${expected}`);
+  }
+  Assert.ok(
+    selector.calledWith(false),
+    "The startup profile picker is turned off"
+  );
+});

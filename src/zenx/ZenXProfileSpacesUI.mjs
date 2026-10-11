@@ -7,18 +7,19 @@
  *
  * - Shows the spaces of the other profiles after this profile's spaces in the
  *   sidebar space switcher (`#zen-workspaces-button`), badged with the
- *   profile's avatar. Clicking one switches to that profile's window.
+ *   profile's color. Clicking one switches to that profile's window.
  * - Adds "Move to Profile" to the space context menu.
  * - Feeds this window's space changes to the shared registry.
  *
  * See ZenXProfileSpaces.sys.mjs for how profiles talk to each other.
  */
 
-/* global gZenWorkspaces, gZenXProfileSpaces */
+/* global gBrowser, gZenWorkspaces, gZenXProfileSpaces */
 
-const { ZenXProfileSpaces } = ChromeUtils.importESModule(
-  "resource:///modules/zenx/ZenXProfileSpaces.sys.mjs"
-);
+const { ZenXProfileSpaces, OPEN_PROFILE_EDITOR_PREF } =
+  ChromeUtils.importESModule(
+    "resource:///modules/zenx/ZenXProfileSpaces.sys.mjs"
+  );
 
 const STYLESHEET = "chrome://browser/content/zenx/zenx-profile-spaces.css";
 const ROOT_HAS_REMOTE_ATTR = "zenx-has-remote-spaces";
@@ -62,7 +63,8 @@ class nsZenXProfileSpacesUI {
     this.#update();
     ZenXProfileSpaces.schedulePublish();
     // Spaces sent here while this profile was not running.
-    ZenXProfileSpaces.processIncomingHandoffs();
+    await ZenXProfileSpaces.processIncomingHandoffs();
+    this.#maybeOpenProfileEditor();
   }
 
   handleEvent(event) {
@@ -156,13 +158,6 @@ class nsZenXProfileSpacesUI {
       button.appendChild(label);
     }
 
-    if (profile.avatarURL) {
-      const avatar = document.createElement("img");
-      avatar.className = "zenx-remote-space-avatar";
-      avatar.src = profile.avatarURL;
-      button.appendChild(avatar);
-    }
-
     button.addEventListener("command", this);
     return button;
   }
@@ -189,7 +184,20 @@ class nsZenXProfileSpacesUI {
     );
   }
 
+  /** First start of a profile ZenX created: let the user name it. */
+  #maybeOpenProfileEditor() {
+    if (!Services.prefs.getBoolPref(OPEN_PROFILE_EDITOR_PREF, false)) {
+      return;
+    }
+    Services.prefs.clearUserPref(OPEN_PROFILE_EDITOR_PREF);
+    gBrowser.selectedTab = gBrowser.addTrustedTab("about:editprofile");
+  }
+
   #onSpaceMenuShowing(menu) {
+    document.documentElement.toggleAttribute(
+      ROOT_PROFILE_SPACES_ATTR,
+      ZenXProfileSpaces.available
+    );
     if (!this.#moveMenu) {
       this.#moveMenu = document.createXULElement("menu");
       this.#moveMenu.id = "zenx-context-move-space-to-profile";
