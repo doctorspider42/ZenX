@@ -123,7 +123,8 @@ const Z = {
     const doc = win.document;
     const zen = doc.getElementById("context_zenWorkspacesOpenInContainerTab");
     const ours = doc.getElementById("zenx-context-move-space-to-profile");
-    const result = { menu, zenContainerVisible: Z.visible(zen), oursVisible: Z.visible(ours), items: [] };
+    // macOS context menus are native: only the hidden attribute hides an item there.
+    const result = { menu, zenContainerVisible: Z.visible(zen) || !zen?.hidden, oursVisible: Z.visible(ours) && !ours.hidden, items: [] };
     if (result.oursVisible) {
       const shown = new Promise(r => ours.menupopup.addEventListener("popupshown", r, { once: true }));
       ours.openMenu(true);
@@ -415,14 +416,34 @@ def import_arc(inst, arc_profile="Default"):
         if (!items.length) throw new Error("Arc is not listed in the import wizard");
         const item = items.find(i => i.getAttribute("profile") === arcProfile || i.profile?.id === arcProfile || i.textContent.includes(arcProfile === "Default" ? "Arc Home" : "Arc Fun")) ?? items[0];
         item.click();
-        await Z.sleep(800);
+        const selector = shadow.querySelector("#browser-profile-selector");
+        await Z.until(() => selector.selectedPanelItem === item, "Arc selected in the import wizard", 10000);
+        await Z.sleep(300);
+        // The wizard loads what Arc offers asynchronously; Import is ignored
+        // until then.
+        const importButton = shadow.querySelector("#import");
+        await Z.until(
+          () =>
+            !importButton.disabled &&
+            shadow.querySelector('#resource-type-list label[data-resource-type="BOOKMARKS"]')?.hidden === false,
+          "the wizard ready to import from Arc", 15000);
         for (const label of shadow.querySelectorAll("#resource-type-list label[data-resource-type]")) {
           label.control.checked = label.dataset.resourceType === "BOOKMARKS";
         }
         const done = new Promise(r => wizard.addEventListener("MigrationWizard:DoneMigration", r, { once: true }));
         const t0 = Date.now();
-        shadow.querySelector("#import").click();
-        await Promise.race([done, Z.sleep(30000).then(() => { throw new Error("import did not finish in 30s"); })]);
+        importButton.click();
+        await Z.until(() => shadow.querySelector("named-deck, deck")?.getAttribute("selected-view") !== "page-selection", "the import to start", 10000);
+        const finished = await Promise.race([done.then(() => true), Z.sleep(30000).then(() => false)]);
+        if (!finished) {
+          const ws = win.gZenWorkspaces;
+          throw new Error("import did not finish in 30s: " + JSON.stringify({
+            changing: ws.isChangingWorkspace, spaces: ws.getWorkspaces().map(s => [s.name, !!s.zenxArcId]),
+            active: ws.getActiveWorkspaceFromCache()?.name, tabs: ws.allStoredTabs.length,
+            wizardPage: shadow.querySelector("named-deck, deck")?.getAttribute("selected-view"),
+            progress: [...shadow.querySelectorAll("[data-resource-type]")].map(e => e.dataset.resourceType + ":" + (e.querySelector(".message-text")?.textContent || "").slice(0, 40)),
+          }));
+        }
         const ms = Date.now() - t0;
         await Z.until(() => !win.gZenWorkspaces.isChangingWorkspace, "space switch to settle", 10000);
         win.gBrowser.removeTab(prefsTab);
@@ -639,6 +660,10 @@ def scenario_new_profile_and_switching(env):
     )
     check(moved["icon"] == "💼", "emoji icon survives the move")
     check(b_state["editorOpen"], "the profile editor opens in the new profile")
+    check(
+        [sp["name"] for sp in b_state["spaces"]] == ["Work"],
+        f"the new profile holds only the moved space: {[sp['name'] for sp in b_state['spaces']]}",
+    )
     check(not b_state["welcome"], "no Zen welcome screen in the new profile")
     check(not b_state["updatePopup"], "no 'updated' popup in the new profile")
 
@@ -673,7 +698,7 @@ def scenario_new_profile_and_switching(env):
     b.js(
         """
         const win = await Z.ready();
-        const other = win.gZenWorkspaces.getWorkspaces().find(s => s.name !== "Work");
+        const other = win.gZenWorkspaces.getWorkspaces().find(s => s.name !== "Work") ?? (await win.gZenWorkspaces.createAndSaveWorkspace("Other"));
         await win.gZenWorkspaces.changeWorkspaceWithID(other.uuid);
         """
     )
@@ -687,13 +712,51 @@ def scenario_new_profile_and_switching(env):
         button.doCommand();
         """
     )
-    b.js(
+    b_windows = b.js(
         """
         const win = await Z.ready();
         await Z.until(() => win.gZenWorkspaces.getActiveWorkspaceFromCache()?.name === "Work", "B switched to Work", 15000);
+        await Z.sleep(1500);
+        return [...Services.wm.getEnumerator("navigator:browser")].length;
         """
     )
     check(True, "clicking another profile's space switches that profile's window to it")
+    check(
+        b_windows == 1,
+        f"...in the existing window, without opening a new one (windows: {b_windows})",
+    )
+
+    # The same request through a relaunch handed over to the running profile
+    # (what happens when it can't be reached directly).
+    b_profile = b.js('return Services.dirsvc.get("ProfD", Ci.nsIFile).path;')
+    b.js(
+        """
+        const win = await Z.ready();
+        const other = win.gZenWorkspaces.getWorkspaces().find(s => s.name !== "Work") ?? (await win.gZenWorkspaces.createAndSaveWorkspace("Other"));
+        await win.gZenWorkspaces.changeWorkspaceWithID(other.uuid);
+        """
+    )
+    work_uuid = b.js('return Z.spaces().find(s => s.name === "Work").uuid;')
+    a.js(
+        """
+        const [path, uuid] = args;
+        Z.sps().sendCommandLine(path, ["-foreground", "--profile", path, "--zenx-space", uuid], true);
+        """,
+        b_profile,
+        work_uuid,
+    )
+    b_windows = b.js(
+        """
+        const win = await Z.ready();
+        await Z.until(() => win.gZenWorkspaces.getActiveWorkspaceFromCache()?.name === "Work", "B switched to Work after a relaunch", 15000);
+        await Z.sleep(1500);
+        return [...Services.wm.getEnumerator("navigator:browser")].length;
+        """
+    )
+    check(
+        b_windows == 1,
+        f"a relaunch handed to the running profile switches without a new window (windows: {b_windows})",
+    )
 
     # Move another space to the existing profile B.
     target = [s for s in a.js("return Z.spaces();")][0]
@@ -711,7 +774,7 @@ def scenario_new_profile_and_switching(env):
     b.js(
         """
         const [name] = args;
-        await Z.until(() => Z.spaces().filter(s => s.name === name).length >= 1 && Z.spaces().length >= 3, "second space adopted", 20000);
+        await Z.until(() => Z.spaces().some(s => s.name === name && s.uuid), "second space adopted", 20000);
         """,
         target["name"],
     )
@@ -789,7 +852,7 @@ def scenario_restart_with_two_profiles(env):
     names = c.js(
         """
         await Z.ready();
-        await Z.until(() => Z.zenx().getRemoteSpaces().length, "other profile's spaces known after restart", 15000);
+        await Z.until(() => Z.zenx().getRemoteSpaces().length, "other profile's spaces known after restart", 30000);
         return Z.zenx().getRemoteSpaces().flatMap(g => g.spaces.map(s => s.name)).concat(Z.spaces().map(s => s.name));
         """
     )

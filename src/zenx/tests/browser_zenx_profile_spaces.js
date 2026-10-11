@@ -81,7 +81,7 @@ add_task(async function test_shows_and_opens_spaces_of_other_profiles() {
   );
   Assert.deepEqual(
     SelectableProfileService.sendCommandLine.lastCall.args,
-    ["/fake/profiles/Personal", ["--space", "remote-space-1"], true],
+    ["/fake/profiles/Personal", ["--zenx-space", "remote-space-1"], true],
     "The running instance should be asked to switch to the space"
   );
 
@@ -96,7 +96,9 @@ add_task(async function test_shows_and_opens_spaces_of_other_profiles() {
   Assert.ok(
     args
       .join(" ")
-      .endsWith("--profile /fake/profiles/Personal --space remote-space-1"),
+      .endsWith(
+        "--profile /fake/profiles/Personal --zenx-space remote-space-1"
+      ),
     `The profile should start on the space (${args.join(" ")})`
   );
   SelectableProfileService.sendCommandLine.reset();

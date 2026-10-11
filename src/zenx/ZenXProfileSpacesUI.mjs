@@ -240,6 +240,13 @@ class nsZenXProfileSpacesUI {
       );
     }
     this.#moveMenu.hidden = !ZenXProfileSpaces.available;
+    // macOS context menus are native and ignore CSS, only `hidden` works.
+    const zenContainerMenu = document.getElementById(
+      "context_zenWorkspacesOpenInContainerTab"
+    );
+    if (zenContainerMenu && ZenXProfileSpaces.available) {
+      zenContainerMenu.hidden = true;
+    }
     this.#moveMenu.setAttribute("zenx-space-id", this.#spaceIdFromMenu(menu));
   }
 

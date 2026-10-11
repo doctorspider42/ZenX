@@ -46,6 +46,9 @@ const IMPORTED_HANDOFFS_PREF = `${PREF_BRANCH}imported-handoffs`;
 const ENABLED_PREF = `${PREF_BRANCH}enabled`;
 // Seeded into profiles ZenX creates: open the profile editor on first start.
 export const OPEN_PROFILE_EDITOR_PREF = `${PREF_BRANCH}open-profile-editor`;
+// Seeded into profiles ZenX creates for a space: drop the empty space Zen
+// makes on first start once the moved space has arrived.
+const FRESH_PROFILE_PREF = `${PREF_BRANCH}fresh-profile`;
 
 const FORMAT_VERSION = 1;
 const PUBLISH_DELAY_MS = 500;
@@ -353,7 +356,8 @@ class nsZenXProfileSpaces {
     if (!profile) {
       return;
     }
-    const args = ["--space", aSpaceUuid];
+    // See ZenXCommandLine.sys.mjs, it also cleans up after a relaunch.
+    const args = ["--zenx-space", aSpaceUuid];
     try {
       this.#sps.sendCommandLine(profile.path, args, true);
       return;
@@ -542,6 +546,7 @@ class nsZenXProfileSpaces {
       ["zen.updates.last-version", Services.appinfo.version],
       ["zen.updates.last-build-id", Services.appinfo.appBuildID],
       [OPEN_PROFILE_EDITOR_PREF, true],
+      [FRESH_PROFILE_PREF, true],
     ];
     await IOUtils.writeUTF8(
       PathUtils.join(profile.path, "prefs.js"),
@@ -696,6 +701,7 @@ class nsZenXProfileSpaces {
       IMPORTED_HANDOFFS_PREF,
       JSON.stringify(imported.slice(-MAX_IMPORTED_HANDOFFS))
     );
+    await this.#removeStarterSpaces(win);
     this.#setSharedPref(
       handoffPref,
       Object.keys(handoffs).length ? toSharedJSON(handoffs) : null
@@ -704,6 +710,35 @@ class nsZenXProfileSpaces {
     this.#publishTask.disarm();
     this.#publishRegistry();
     win.focus();
+  }
+
+  /**
+   * A profile made for a space should only hold that space, like in Arc, not
+   * also the empty one Zen creates on first start.
+   *
+   * @param {Window} aWindow
+   */
+  async #removeStarterSpaces(aWindow) {
+    if (!Services.prefs.getBoolPref(FRESH_PROFILE_PREF, false)) {
+      return;
+    }
+    const { gZenWorkspaces } = aWindow;
+    const spaces = gZenWorkspaces.getWorkspaces();
+    if (!spaces.some(space => space.zenxMovedFrom)) {
+      return;
+    }
+    Services.prefs.clearUserPref(FRESH_PROFILE_PREF);
+    for (const space of spaces) {
+      const hasTabs = gZenWorkspaces.allStoredTabs.some(
+        tab =>
+          tab.getAttribute("zen-workspace-id") === space.uuid &&
+          !tab.hasAttribute("zen-empty-tab") &&
+          !tab.linkedBrowser?.currentURI?.spec.startsWith("about:editprofile")
+      );
+      if (!space.zenxMovedFrom && !hasTabs) {
+        await gZenWorkspaces.removeWorkspace(space.uuid);
+      }
+    }
   }
 
   #hasSpaceMovedFrom(aWindow, aSourceUuid) {
