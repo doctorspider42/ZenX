@@ -1,0 +1,21 @@
+diff --git a/browser/moz.configure b/browser/moz.configure
+index 446e8637d053b1d6972d0a1b712d75322b011a17..32af78cd4bac877b3a3ba5ae439e2ba71ddbb776 100644
+--- a/browser/moz.configure
++++ b/browser/moz.configure
+@@ -12,6 +12,16 @@ imply_option("MOZ_PROFILE_MIGRATOR", True)
+ 
+ 
+ imply_option("MOZ_APP_VENDOR", "Mozilla")
++# ZenX: own profile root (~/Library/Application Support/zenx), next to Zen.
++imply_option("MOZ_APP_PROFILE", "zenx")
++
++# ZenX: the update server host. Surfer exports MOZ_APPUPDATE_HOST from
++# surfer.json's updateHostname; build/moz.build (Zen) reads it from CONFIG.
++option(env="MOZ_APPUPDATE_HOST", nargs=1, help="Host of the update server")
++set_config(
++    "MOZ_APPUPDATE_HOST",
++    depends("MOZ_APPUPDATE_HOST")(lambda value: value[0] if value else None),
++)
+ imply_option("MOZ_APP_ID", "{ec8030f7-c20a-464f-9b0e-13a3a9e97384}")
+ # Include the DevTools client, not just the server (which is the default)
+ imply_option("MOZ_DEVTOOLS", "all")

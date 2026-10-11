@@ -52,7 +52,7 @@ npm start                         # = cd engine && ./mach run --noprofile (tempo
 cd engine && ./mach run -P zenx-dev   # a persistent named profile
 ```
 
-The build output is `engine/obj-aarch64-apple-darwin/dist/Zen.app` (name from brand). Testing cross-profile features (ZenX profile spaces) needs a profile group: in the app menu → Profiles → New profile; each profile opens its own process/window.
+The build output is `engine/obj-aarch64-apple-darwin/dist/Nightly.app` for local (unofficial brand) builds and `ZenX.app` for release builds; the binary is `zenx`, profiles live in `~/Library/Application Support/zenx` (Zen's are in `.../zen`, so both can be installed). Cross-profile features (ZenX profile spaces) need a second profile: right click a space → Set Profile → New Profile… (Firefox's own Profiles menus are hidden in ZenX); each profile is its own process/window.
 
 ## Tests
 
@@ -88,7 +88,7 @@ Mozilla style: 2 spaces, double quotes, `arrowParens: "avoid"`, `trailingComma: 
 - **Warnings about `rust-objcopy` / `libLLVM.dylib`** → harmless.
 - **`Missing chrome or resource URLs: resource:///modules/zenx/...` crash** → new file not imported (`npm run import`), app bundle stale (`./mach build faster`), or xpcshell manifest lacks `firefox-appdir = "browser"`.
 - **Counting tabs in tests**: `gBrowser.tabs` only has the *active* space's pinned tabs; use `gZenWorkspaces.allStoredTabs` for every tab.
-- **A change works in tests but not in the user's running app** → Firefox's startup cache (per profile, `~/Library/Caches/zen/Profiles/*/startupCache`) still serves the old compiled modules, because `./mach build faster` doesn't change the build ID. Run `scripts/zenx-relaunch.sh`: it quits every ZenX profile (each is its own process), clears `~/Library/Caches/zen/Profiles/*/startupCache` and opens the app again. Tests always use fresh profiles, so they never see this.
+- **A change works in tests but not in the user's running app** → Firefox's startup cache (per profile, `~/Library/Caches/zenx/Profiles/*/startupCache`) still serves the old compiled modules, because `./mach build faster` doesn't change the build ID. Run `scripts/zenx-relaunch.sh`: it quits every ZenX profile (each is its own process), clears `~/Library/Caches/zenx/Profiles/*/startupCache` and opens the app again. Tests always use fresh profiles, so they never see this.
 - **Strings show as ids / missing** → `python3 scripts/update_en_US_packs.py` then `./mach build faster`.
 - **A Firefox file edit vanished** → it was made in `engine/` and not exported; edit again and `npx surfer export <path>`.
 - **Slow machine during build** → Spotlight indexing `engine/`; the user can exclude it in System Settings → Spotlight → Privacy.

@@ -10,8 +10,15 @@
 
 set -euo pipefail
 
-APP="$(cd "$(dirname "$0")/.." && pwd)/engine/obj-aarch64-apple-darwin/dist/Nightly.app"
-BIN="$APP/Contents/MacOS/zen"
+DIST="$(cd "$(dirname "$0")/.." && pwd)/engine/obj-aarch64-apple-darwin/dist"
+# The bundle is Nightly.app for local (unofficial) builds and ZenX.app for
+# release builds; the binary is whatever the bundle says.
+APP="$(find "$DIST" -maxdepth 1 -name "*.app" -type d | head -1)"
+if [ -z "$APP" ]; then
+  echo "No build found in $DIST, build first." >&2
+  exit 1
+fi
+BIN="$APP/Contents/MacOS/$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP/Contents/Info.plist")"
 
 if pgrep -f "$BIN" >/dev/null; then
   echo "Quitting running ZenX profiles..."
@@ -26,7 +33,7 @@ if pgrep -f "$BIN" >/dev/null; then
   fi
 fi
 
-rm -rf "$HOME/Library/Caches/zen/Profiles/"*/startupCache
+rm -rf "$HOME/Library/Caches/zenx/Profiles/"*/startupCache
 echo "Startup caches cleared."
 
 open "$APP"

@@ -31,8 +31,33 @@ Zen files that ZenX changes today:
 | `src/zen/common/modules/ZenUpdates.mjs` | bug fix: `playWindowSweepAnimation` runs one sweep at a time, animates its own elements (not by id), always removes them and never takes clicks. Importing several spaces at once used to leave full-window overlays that swallowed every click ("frozen" browser). Worth sending upstream. |
 | `src/zen/folders/ZenFolders.mjs` | bug fix: a folder's empty tab belongs to the folder's space. Without it, a folder created in a space that isn't active came back in the active space after a restart. Worth sending upstream. |
 | `prefs/firefox/browser.yaml` | `browser.profiles.enabled = true` |
+| `surfer.json` | ZenX name, vendor, app id, binary name `zenx`, release brand names, GitHub repo, update host (see Identity) |
+| `/mozconfig` (new, tracked with `git add -f` because Zen ignores it) | app name, bundle id, source repo (see Identity) |
+| `src/testing/xpcshell/runxpcshelltests-py.patch` (Zen's patch, one line) | also map `zenx-appdir` to `firefox-appdir`, so xpcshell tests find the browser modules under the app name zenx |
+| `src/browser/moz-configure.patch` (new Firefox patch) | profile root `zenx` (`MOZ_APP_PROFILE` can only be implied, not set in a mozconfig), and a `MOZ_APPUPDATE_HOST` option so surfer.json's update host reaches the build |
 | `src/browser/components/migration/MigrationUtils-sys-mjs.patch` (new Firefox patch) | registers the Arc migrator |
 | `src/browser/locales/en-US/browser/migrationWizard-ftl.patch` (new Firefox patch) | the "Arc" name in the import wizard |
+
+## Identity
+
+ZenX installs and runs next to Zen. Each has its own profiles and its own updates.
+
+| | Zen | ZenX |
+| --- | --- | --- |
+| App (release build) | Zen.app | ZenX.app (local builds: Nightly.app) |
+| Binary | `zen` | `zenx` |
+| Profiles | `~/Library/Application Support/zen` | `~/Library/Application Support/zenx` |
+| Bundle id | `app.zen-browser.zen` | `com.doctorspider42.zenx` |
+| Remoting name | `zen…` | `zenx…` (ZenX and Zen never forward command lines to each other) |
+| Updates | updates.zen-browser.app | `https://doctorspider42.github.io/ZenX/updates/browser/%BUILD_TARGET%/%CHANNEL%/update.xml` |
+
+Where each setting comes from:
+
+- **Surfer appends `/mozconfig` after Zen's mozconfigs**, so its settings win: app name and basename, `--with-distribution-id=com.doctorspider42`, `MOZ_MACBUNDLE_ID=zenx`, and the source repo.
+- **`surfer.json`** provides the brand names of release builds and the update host. Only a few lines change there, and upstream rarely touches them.
+- **The profile root** is set by `imply_option("MOZ_APP_PROFILE", "zenx")` in `src/browser/moz-configure.patch`.
+
+Icons are still Zen's for now (`configs/branding`).
 
 ## Spaces bound to profiles
 

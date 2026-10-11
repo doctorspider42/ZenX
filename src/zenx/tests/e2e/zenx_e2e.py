@@ -26,6 +26,7 @@ Run (from the engine directory, after a build):
 import argparse
 import json
 import os
+import plistlib
 import shutil
 import socket
 import subprocess
@@ -40,8 +41,21 @@ from marionette_driver.marionette import Marionette
 HERE = Path(__file__).resolve().parent
 # HERE is src/zenx/tests/e2e (engine/zenx is a symlink farm into src).
 ENGINE = HERE.parents[3] / "engine"
-APP = ENGINE / "obj-aarch64-apple-darwin" / "dist" / "Nightly.app"
-BINARY = APP / "Contents" / "MacOS" / "zen"
+DIST = ENGINE / "obj-aarch64-apple-darwin" / "dist"
+# Nightly.app for local (unofficial) builds, ZenX.app for release builds.
+APP = next(DIST.glob("*.app"), DIST / "Nightly.app")
+BINARY = (
+    APP
+    / "Contents"
+    / "MacOS"
+    / (
+        plistlib.loads((APP / "Contents" / "Info.plist").read_bytes())[
+            "CFBundleExecutable"
+        ]
+        if (APP / "Contents" / "Info.plist").exists()
+        else "zenx"
+    )
+)
 
 
 def synthetic_arc():
