@@ -62,6 +62,18 @@ add_task(async function test_shows_and_opens_spaces_of_other_profiles() {
     "Other profiles' spaces should come after this profile's spaces"
   );
 
+  const buttons = [
+    ...document.querySelectorAll("#zen-workspaces-button toolbarbutton"),
+  ];
+  const remoteIndex = buttons.indexOf(button);
+  const rect = button.getBoundingClientRect();
+  const previous = buttons[remoteIndex - 1].getBoundingClientRect();
+  Assert.greater(rect.width, 8, "The remote space button has a real width");
+  Assert.ok(
+    rect.left >= previous.right - 1 || rect.top >= previous.bottom - 1,
+    "The remote space button doesn't overlap the button before it"
+  );
+
   button.doCommand();
   await TestUtils.waitForCondition(
     () => SelectableProfileService.sendCommandLine.called,

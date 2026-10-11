@@ -18,21 +18,13 @@
     background: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
   }
 
-  /* Spaces of other profiles: a bar in the profile's color under the icon. */
+  /* Spaces of other profiles: a bar in the profile's color under the icon.
+   * Drawn as a background, ::after is Zen's compact-mode dot. */
   & toolbarbutton.zenx-remote-space {
-    flex-shrink: 0;
-
-    &::after {
-      content: "";
-      pointer-events: none;
-      position: absolute;
-      inset-inline: 30%;
-      inset-block-end: 3px;
-      height: 2px;
-      border-radius: 1px;
-      background: var(--zenx-profile-color, currentColor);
-      opacity: 0.8;
-    }
+    background-image: linear-gradient(var(--zenx-profile-color, currentColor), var(--zenx-profile-color, currentColor));
+    background-size: 40% 2px;
+    background-position: center bottom 3px;
+    background-repeat: no-repeat;
   }
 
   /* A space sent to another profile and not adopted there yet. */

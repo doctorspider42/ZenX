@@ -128,6 +128,9 @@ class nsZenXProfileSpacesUI {
         switcher.appendChild(this.#createRemoteSpaceButton(profile, space));
       }
     }
+    // Zen sizes every button of the switcher (and switches to compact dots
+    // when they don't fit); ours have to be part of that or they overlap.
+    gZenWorkspaces.onWindowResize();
   }
 
   #createRemoteSpaceButton(profile, space) {
