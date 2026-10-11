@@ -15,4 +15,6 @@ support-files = [
 
 ["browser_zenx_arc_import.js"]
 
+["browser_zenx_profile_spaces_first_run.js"]
+
 ["browser_zenx_profile_spaces.js"]

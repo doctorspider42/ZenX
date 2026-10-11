@@ -93,12 +93,17 @@ class nsZenXProfileSpaces {
     return lazy.SelectableProfileService;
   }
 
-  /** Profiles are switched on (pref) and allowed by policy. */
+  /**
+   * Spaces can be bound to profiles: switched on by prefs and allowed by
+   * policy. Firefox's own service only reports itself enabled once a profile
+   * group exists, which ZenX creates on the first "New Profile", so it is not
+   * required here.
+   */
   get available() {
     return (
       Services.prefs.getBoolPref(ENABLED_PREF, true) &&
       Services.prefs.getBoolPref("browser.profiles.enabled", false) &&
-      this.#sps.isEnabled
+      Services.policies.isAllowed("profileManagement")
     );
   }
 
@@ -126,7 +131,10 @@ class nsZenXProfileSpaces {
       () => this.#publishRegistry(),
       PUBLISH_DELAY_MS
     );
-    if (this.available && !this.#sps.initialized) {
+    this.#sps.on("enableChanged", () =>
+      this.#refreshProfiles().then(() => this.#notifyListeners())
+    );
+    if (this.available && this.#sps.isEnabled && !this.#sps.initialized) {
       // The profile service finishes starting up in parallel with the first
       // window, wait for it so the current profile is known.
       await this.#sps.init();
@@ -187,7 +195,7 @@ class nsZenXProfileSpaces {
   }
 
   async #refreshProfiles() {
-    if (!this.available || !this.#sps.initialized) {
+    if (!this.available || !this.#sps.isEnabled || !this.#sps.initialized) {
       this.#profiles = [];
       return;
     }
