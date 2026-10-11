@@ -99,6 +99,7 @@ class nsZenXProfileSpacesUI {
       ROOT_PROFILE_SPACES_ATTR,
       ZenXProfileSpaces.available
     );
+    this.#hideMenubarProfilesMenu();
     this.#renderRemoteSpaces();
     this.#renderPendingMoves();
   }
@@ -182,6 +183,31 @@ class nsZenXProfileSpacesUI {
         ?.closest?.("[zen-workspace-id]")
         ?.getAttribute("zen-workspace-id") || gZenWorkspaces.activeWorkspace
     );
+  }
+
+  #menubarObserver = null;
+
+  /**
+   * The macOS menu bar is native and ignores CSS, only the hidden attribute
+   * works there. Firefox resets it whenever profiles change, so keep it set.
+   */
+  #hideMenubarProfilesMenu() {
+    const menu = document.getElementById("profiles-menu");
+    if (!menu || !ZenXProfileSpaces.available) {
+      return;
+    }
+    menu.hidden = true;
+    if (!this.#menubarObserver) {
+      this.#menubarObserver = new MutationObserver(() => {
+        if (!menu.hidden && ZenXProfileSpaces.available) {
+          menu.hidden = true;
+        }
+      });
+      this.#menubarObserver.observe(menu, {
+        attributes: true,
+        attributeFilter: ["hidden"],
+      });
+    }
   }
 
   /** First start of a profile ZenX created: let the user name it. */

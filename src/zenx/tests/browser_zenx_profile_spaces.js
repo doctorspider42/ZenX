@@ -420,3 +420,15 @@ add_task(async function test_firefox_profile_menus_hidden() {
   );
   await gCUITestUtils.hideMainMenu();
 });
+
+add_task(async function test_menubar_profiles_menu_stays_hidden() {
+  const menu = document.getElementById("profiles-menu");
+  Assert.ok(menu.hidden, "The menu bar Profiles menu is hidden");
+  // Firefox shows it again whenever profiles change.
+  gProfiles.toggleProfileMenus(true);
+  menu.hidden = false;
+  await TestUtils.waitForCondition(
+    () => menu.hidden,
+    "ZenX hides it again (the native macOS menu bar ignores CSS)"
+  );
+});
