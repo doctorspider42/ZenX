@@ -55,3 +55,22 @@
 :root[zenx-profile-spaces] :is(#context_zenWorkspacesOpenInContainerTab, .zen-workspace-creation-profile-wrapper) {
   display: none !important;
 }
+
+/* Profiles are managed only from a space's "Set Profile" menu. Firefox's own
+ * profile UI (switching, creating, copying, managing) mixes them up. */
+:root[zenx-profile-spaces]
+  :is(
+    #appMenu-profiles-button,
+    #profiles-menu,
+    #PanelUI-fxa-menu-profiles-header-label,
+    #PanelUI-fxa-menu-profile-buttons,
+    #PanelUI-fxa-menu-profiles-separator,
+    #PanelUI-fxa-menu-all-profiles-create-button,
+    #PanelUI-fxa-menu-all-profiles-manage-button,
+    #PanelUI-fxa-menu-create-profile-footer-separator,
+    #PanelUI-fxa-menu-create-profile-learn-more-button,
+    #PanelUI-fxa-menu-create-profile-copy-button,
+    #PanelUI-fxa-menu-create-profile-manage-button
+  ) {
+  display: none !important;
+}

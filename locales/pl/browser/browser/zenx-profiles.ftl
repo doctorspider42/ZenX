@@ -11,6 +11,8 @@ zenx-move-space-to-profile =
     .label = Ustaw profil
 zenx-move-space-new-profile =
     .label = Nowy profil…
+zenx-edit-current-profile =
+    .label = Edytuj ten profil…
 zenx-move-space-cancel =
     .label = Anuluj przenoszenie
 

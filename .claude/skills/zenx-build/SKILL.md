@@ -86,6 +86,7 @@ Mozilla style: 2 spaces, double quotes, `arrowParens: "avoid"`, `trailingComma: 
 - **Warnings about `rust-objcopy` / `libLLVM.dylib`** → harmless.
 - **`Missing chrome or resource URLs: resource:///modules/zenx/...` crash** → new file not imported (`npm run import`), app bundle stale (`./mach build faster`), or xpcshell manifest lacks `firefox-appdir = "browser"`.
 - **Counting tabs in tests**: `gBrowser.tabs` only has the *active* space's pinned tabs; use `gZenWorkspaces.allStoredTabs` for every tab.
+- **A change works in tests but not in the user's running app** → Firefox's startup cache (per profile, `~/Library/Caches/zen/Profiles/*/startupCache`) still serves the old compiled modules, because `./mach build faster` doesn't change the build ID. Quit every ZenX window (each profile is its own process), then `rm -rf ~/Library/Caches/zen/Profiles/*/startupCache` or launch once with `--args -purgecaches`. Tests always use fresh profiles, so they never see this.
 - **Strings show as ids / missing** → `python3 scripts/update_en_US_packs.py` then `./mach build faster`.
 - **A Firefox file edit vanished** → it was made in `engine/` and not exported; edit again and `npx surfer export <path>`.
 - **Slow machine during build** → Spotlight indexing `engine/`; the user can exclude it in System Settings → Spotlight → Privacy.

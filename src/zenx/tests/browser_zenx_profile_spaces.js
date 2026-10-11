@@ -319,14 +319,14 @@ add_task(async function test_space_menu_set_profile_like_arc() {
   const items = [...setProfile.menupopup.querySelectorAll("menuitem")];
   Assert.deepEqual(
     items.map(item => item.getAttribute("label")),
-    ["Work", "Personal", "New Profile…"],
-    "Every profile is listed, New Profile last"
+    ["Work", "Personal", "New Profile…", "Edit This Profile…"],
+    "Every profile, then New Profile, then editing this profile"
   );
   Assert.equal(items[0].getAttribute("checked"), "true", "Own profile checked");
   Assert.equal(
-    items.at(-1).getAttribute("zenx-profile-id"),
+    items[2].getAttribute("zenx-profile-id"),
     "new",
-    "The last item creates a new profile"
+    "New Profile creates a new profile"
   );
 
   const hidden = BrowserTestUtils.waitForPopupEvent(menu, "hidden");
@@ -398,4 +398,25 @@ add_task(async function test_new_profile_is_prepared() {
     selector.calledWith(false),
     "The startup profile picker is turned off"
   );
+});
+
+add_task(async function test_firefox_profile_menus_hidden() {
+  await TestUtils.waitForCondition(
+    () => document.documentElement.hasAttribute("zenx-profile-spaces"),
+    "The window knows spaces are bound to profiles"
+  );
+  // The app menu is built from a template the first time it opens.
+  await gCUITestUtils.openMainMenu();
+  const button = PanelMultiView.getViewNode(
+    document,
+    "appMenu-profiles-button"
+  );
+  // Firefox only shows the button once profiles exist; force it so the test
+  // checks our rule, not Firefox's.
+  button.hidden = false;
+  Assert.ok(
+    !button.checkVisibility(),
+    "Firefox's Profiles button is hidden in the app menu"
+  );
+  await gCUITestUtils.hideMainMenu();
 });

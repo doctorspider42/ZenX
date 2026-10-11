@@ -45,7 +45,7 @@ A Firefox profile is a separate process: Firefox cannot run two profiles in one 
 - **New Profile…** creates the profile before it first starts. Zen's welcome screen and "updated" popup are skipped there, and the profile editor (`about:editprofile`: name, avatar, theme) opens on its first start.
 - Firefox's startup profile picker is turned off: ZenX starts in the last used profile, and new profiles are made from a space.
 - Values shared between profiles are ASCII-only JSON (`toSharedJSON`). Firefox copies shared prefs as bytes, which breaks emoji and non-English text.
-- Profiles themselves (creating, renaming, avatars, deleting) are managed in Firefox's profile menu in the app menu and at `about:profilemanager`.
+- Firefox's own profile UI is hidden: the Profiles button in the app menu, the Profiles menu in the macOS menu bar, and the profile section of the account panel. The space menu's **Set Profile → Edit This Profile…** opens `about:editprofile` (name, avatar, theme, delete).
 
 What does not move: essentials (they belong to the profile and container, not the space), and tabs of extension pages, `about:blank`, `blob:` and `data:` URLs. The confirmation dialog says how many tabs will be dropped.
 

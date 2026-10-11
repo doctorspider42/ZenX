@@ -254,6 +254,16 @@ class nsZenXProfileSpacesUI {
     newProfile.setAttribute("zenx-profile-id", "new");
     newProfile.addEventListener("command", this);
     popup.appendChild(newProfile);
+
+    // Firefox's profile menus are hidden, so editing lives here.
+    if (ZenXProfileSpaces.active) {
+      popup.appendChild(document.createXULElement("menuseparator"));
+      const edit = document.createXULElement("menuitem");
+      document.l10n.setAttributes(edit, "zenx-edit-current-profile");
+      edit.setAttribute("zenx-action", "edit-profile");
+      edit.addEventListener("command", this);
+      popup.appendChild(edit);
+    }
   }
 
   async #onCommand(event) {
@@ -268,6 +278,9 @@ class nsZenXProfileSpacesUI {
 
     const spaceId = this.#moveMenu.getAttribute("zenx-space-id");
     switch (target.getAttribute("zenx-action")) {
+      case "edit-profile":
+        gBrowser.selectedTab = gBrowser.addTrustedTab("about:editprofile");
+        break;
       case "cancel-move":
         ZenXProfileSpaces.cancelPendingMove(spaceId);
         break;

@@ -18,6 +18,11 @@ const { ZenXProfileSpaces, REGISTRY_PREFIX, HANDOFF_PREFIX } =
     "resource:///modules/zenx/ZenXProfileSpaces.sys.mjs"
   );
 
+const { CustomizableUITestUtils } = ChromeUtils.importESModule(
+  "resource://testing-common/CustomizableUITestUtils.sys.mjs"
+);
+const gCUITestUtils = new CustomizableUITestUtils(window);
+
 const CURRENT_PROFILE_ID = 1;
 const OTHER_PROFILE_ID = 2;
 
