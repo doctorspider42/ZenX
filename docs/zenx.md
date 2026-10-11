@@ -28,6 +28,7 @@ Zen files that ZenX changes today:
 | `src/zen/common/ZenPreloadedScripts.js` | loads `ZenXProfileSpacesUI.mjs` in browser windows |
 | `src/zen/zen.globals.mjs` | lint global `gZenXProfileSpaces` |
 | `src/zen/share/ZenShareManager.mjs` | public `importSpace(item)`, which returns the new space |
+| `src/zen/common/modules/ZenUpdates.mjs` | bug fix: `playWindowSweepAnimation` runs one sweep at a time, animates its own elements (not by id), always removes them and never takes clicks. Importing several spaces at once used to leave full-window overlays that swallowed every click ("frozen" browser). Worth sending upstream. |
 | `src/zen/folders/ZenFolders.mjs` | bug fix: a folder's empty tab belongs to the folder's space. Without it, a folder created in a space that isn't active came back in the active space after a restart. Worth sending upstream. |
 | `prefs/firefox/browser.yaml` | `browser.profiles.enabled = true` |
 | `src/browser/components/migration/MigrationUtils-sys-mjs.patch` (new Firefox patch) | registers the Arc migrator |
@@ -81,7 +82,8 @@ The wizard lists Arc because `prefs/zenx/arc.yaml` sets `browser.migrate.arc.ena
 - Zen's production startup and animations, not the mochitest testing mode.
 - Quits like Cmd+Q, and restarts.
 - Controls several profile processes at once.
-- Uses synthetic Arc data (`ZENX_ARC_DATA_DIR`).
+- Uses synthetic Arc data (`ZENX_ARC_DATA_DIR`), generated in the shape of a real sidebar: several spaces, nested folders, a split view, unpinned tabs, favorites, and a second Arc profile.
+- Fails if anything covers the window after an import (`ui_responsive`).
 
 Scenarios:
 

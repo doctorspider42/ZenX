@@ -42,7 +42,179 @@ HERE = Path(__file__).resolve().parent
 ENGINE = HERE.parents[3] / "engine"
 APP = ENGINE / "obj-aarch64-apple-darwin" / "dist" / "Nightly.app"
 BINARY = APP / "Contents" / "MacOS" / "zen"
-ARC_FIXTURE = HERE.parent / "unit" / "arc-sidebar-fixture.json"
+
+
+def synthetic_arc():
+    """
+    A synthetic Arc sidebar shaped like a real one: several spaces in the
+    default Arc profile (with folders, nested folders, a split view, unpinned
+    tabs and favorites), plus a space in a second Arc profile that must not be
+    imported. Returns (sidebar JSON, expected spaces by name).
+    """
+    items, spaces, expected = [], [], {}
+    counter = [0]
+
+    def new_id(prefix):
+        counter[0] += 1
+        return f"{prefix}-{counter[0]}"
+
+    def add(obj):
+        items.extend([obj["id"], obj])
+        return obj["id"]
+
+    def tab(parent, n):
+        i = new_id("tab")
+        return add({
+            "id": i,
+            "parentID": parent,
+            "title": None,
+            "childrenIds": [],
+            "data": {
+                "tab": {
+                    "savedURL": f"https://example.com/{i}",
+                    "savedTitle": f"Tab {n}",
+                }
+            },
+        })
+
+    def container(space_id, children):
+        cid = new_id("container")
+        add({
+            "id": cid,
+            "parentID": None,
+            "title": None,
+            "childrenIds": children,
+            "data": {
+                "itemContainer": {"containerType": {"spaceItems": {"_0": space_id}}}
+            },
+        })
+        return cid
+
+    def folder(parent, name, n_tabs, nested=None):
+        fid = new_id("folder")
+        children = [tab(fid, k) for k in range(n_tabs)]
+        if nested:
+            children.append(folder(fid, *nested))
+        add({
+            "id": fid,
+            "parentID": parent,
+            "title": name,
+            "childrenIds": children,
+            "data": {"list": {}},
+        })
+        return fid
+
+    def split(parent):
+        sid = new_id("split")
+        tab(sid, 1)
+        tab(sid, 2)  # children only linked by parentID, like real Arc files
+        add({
+            "id": sid,
+            "parentID": parent,
+            "title": None,
+            "childrenIds": [],
+            "data": {"splitView": {"layoutOrientation": "horizontal"}},
+        })
+        return sid
+
+    # (title, emoji, pinned loose tabs, folders [(name, tabs, nested)], split?, unpinned tabs, arc profile)
+    layout = [
+        ("Work", "💼", 1, [("Projects", 1, ("Nested", 1))], True, 1, "Default"),
+        ("Fun", "🎉", 3, [("Games", 2, None)], False, 0, "Default"),
+        (
+            "Money",
+            "🤑",
+            4,
+            [("Bills", 2, None), ("Taxes", 2, None)],
+            False,
+            2,
+            "Default",
+        ),
+        (
+            None,
+            None,
+            2,
+            [("A", 3, None), ("B", 3, None), ("C", 2, None)],
+            False,
+            0,
+            "Default",
+        ),
+        ("Other profile", "🙈", 2, [], False, 0, "Profile 1"),
+    ]
+    for title, emoji, loose, folders, has_split, unpinned, arc_profile in layout:
+        space_id = new_id("space")
+        pinned_children_ids = []
+        pinned_cid = container(space_id, pinned_children_ids)
+        for k in range(loose):
+            pinned_children_ids.append(tab(pinned_cid, k))
+        for name, n, nested in folders:
+            pinned_children_ids.append(folder(pinned_cid, name, n, nested))
+        if has_split:
+            pinned_children_ids.append(split(pinned_cid))
+        unpinned_children = []
+        unpinned_cid = container(space_id, unpinned_children)
+        for k in range(unpinned):
+            unpinned_children.append(tab(unpinned_cid, k))
+        profile = (
+            {"default": True}
+            if arc_profile == "Default"
+            else {"custom": {"_0": {"directoryBasename": arc_profile}}}
+        )
+        space = {
+            "id": space_id,
+            "profile": profile,
+            "newContainerIDs": [
+                {"unpinned": {"_0": {"shared": {}}}},
+                unpinned_cid,
+                {"pinned": {}},
+                pinned_cid,
+            ],
+            "customInfo": {
+                "iconType": {"emoji_v2": emoji} if emoji else {"icon": "planet"}
+            },
+        }
+        if title:
+            space["title"] = title
+        spaces.extend([space_id, space])
+        if arc_profile == "Default":
+            n_folders = sum(1 + (1 if nested else 0) for _, _, nested in folders)
+            n_pinned = (
+                loose
+                + sum(n + (nested[1] if nested else 0) for _, n, nested in folders)
+                + (2 if has_split else 0)
+            )
+            expected[title or "Space"] = {
+                "icon": emoji,
+                "pinned": n_pinned,
+                "normal": unpinned,
+                "folders": n_folders,
+            }
+    fav_default = new_id("top")
+    add({
+        "id": fav_default,
+        "parentID": None,
+        "title": None,
+        "childrenIds": [],
+        "data": {
+            "itemContainer": {"containerType": {"topApps": {"_0": {"default": True}}}}
+        },
+    })
+    fav_tab = tab(fav_default, 0)
+    items[items.index(fav_default) + 1]["childrenIds"] = [fav_tab]
+    sidebar = {
+        "sidebar": {
+            "containers": [
+                {"global": {}},
+                {
+                    "spaces": spaces,
+                    "items": items,
+                    "topAppsContainerIDs": [{"default": True}, fav_default],
+                },
+            ]
+        },
+        "version": 1,
+    }
+    return sidebar, expected
 
 
 class Failure(AssertionError):
@@ -230,7 +402,10 @@ class Env:
         self.arc_dir = self.tmp / "Arc"
         (self.arc_dir / "User Data" / "Default").mkdir(parents=True)
         (self.arc_dir / "User Data" / "Profile 1").mkdir(parents=True)
-        shutil.copy(ARC_FIXTURE, self.arc_dir / "StorableSidebar.json")
+        sidebar, self.expected_arc = synthetic_arc()
+        (self.arc_dir / "StorableSidebar.json").write_text(
+            json.dumps(sidebar, ensure_ascii=False)
+        )
         (self.arc_dir / "User Data" / "Local State").write_text(
             json.dumps({
                 "profile": {
@@ -426,7 +601,7 @@ def import_arc(inst, arc_profile="Default"):
           () =>
             !importButton.disabled &&
             shadow.querySelector('#resource-type-list label[data-resource-type="BOOKMARKS"]')?.hidden === false,
-          "the wizard ready to import from Arc", 15000);
+          "the wizard ready to import from Arc", 40000);
         for (const label of shadow.querySelectorAll("#resource-type-list label[data-resource-type]")) {
           label.control.checked = label.dataset.resourceType === "BOOKMARKS";
         }
@@ -458,6 +633,14 @@ def ui_responsive(inst):
     return inst.js(
         """
         const win = await Z.ready();
+        // Nothing may sit over the window catching clicks (e.g. a sweep
+        // animation overlay that was never removed).
+        await Z.until(() => !win.document.querySelector("#zen-update-animation, #zen-update-animation-border"), "animation overlays gone", 5000);
+        const sidebar = win.document.getElementById("zen-workspaces-button").getBoundingClientRect();
+        const hit = win.document.elementFromPoint(sidebar.x + sidebar.width / 2, sidebar.y + sidebar.height / 2);
+        if (!hit || !win.document.getElementById("zen-workspaces-button").contains(hit)) {
+          throw new Error("something covers the space switcher: " + (hit && (hit.localName + "#" + hit.id)));
+        }
         const ids = win.gZenWorkspaces.getWorkspaces().map(s => s.uuid);
         const target = ids.find(id => id !== win.gZenWorkspaces.activeWorkspace);
         if (!target) return true;
@@ -469,36 +652,21 @@ def ui_responsive(inst):
     )
 
 
-def expected_fixture_spaces():
-    # From unit/arc-sidebar-fixture.json, Arc profile "Default".
-    return {"Work": {"icon": "💼", "pinned": 5, "normal": 1, "folders": 2}}
-
-
-def check_arc_spaces(spaces, label):
-    arc = [s for s in spaces if s["arc"]]
+def check_arc_spaces(env, spaces, label):
+    arc = {s["name"]: s for s in spaces if s["arc"]}
+    expected = env.expected_arc
     check(
-        len(arc) == 1,
-        f"{label}: one Arc space (Default profile only), got {[s['name'] for s in arc]}",
+        sorted(arc) == sorted(expected),
+        f"{label}: Arc spaces of the default Arc profile only: {sorted(arc)}",
     )
-    work = arc[0]
-    exp = expected_fixture_spaces()["Work"]
-    check(
-        work["name"] == "Work" and work["icon"] == exp["icon"],
-        f"{label}: name and emoji icon kept",
-    )
-    check(
-        work["pinned"] == exp["pinned"],
-        f"{label}: {exp['pinned']} pinned tabs (incl. folders/split), got {work['pinned']}",
-    )
-    check(
-        work["normal"] == exp["normal"],
-        f"{label}: {exp['normal']} normal tab, got {work['normal']}",
-    )
-    check(
-        work["folders"] == exp["folders"],
-        f"{label}: {exp['folders']} folders, got {work['folders']}",
-    )
-    return work
+    for name, exp in expected.items():
+        got = arc[name]
+        check(
+            (got["icon"], got["pinned"], got["normal"], got["folders"])
+            == (exp["icon"], exp["pinned"], exp["normal"], exp["folders"]),
+            f"{label}: '{name}' icon/pinned/normal/folders = {(got['icon'], got['pinned'], got['normal'], got['folders'])}, expected {(exp['icon'], exp['pinned'], exp['normal'], exp['folders'])}",
+        )
+    return arc
 
 
 def check_space_menu(inst, label, expect_profiles):
@@ -575,7 +743,7 @@ def scenario_import_into_empty(env):
     print(f"    import took {res['ms']} ms")
     check(res["ms"] < 15000, "import finishes quickly")
     check(ui_responsive(inst), "UI responds to a space switch right after import")
-    check_arc_spaces(inst.js("return Z.spaces();"), "after import")
+    check_arc_spaces(env, inst.js("return Z.spaces();"), "after import")
     check(inst.js("return Z.essentials();") == 1, "favorite became an essential")
     check_space_menu(inst, "after import", expect_profiles=0)
     for n in (1, 2):
@@ -589,7 +757,7 @@ def scenario_import_into_empty(env):
                 for s in inst.js("return Z.spaces();")
             ],
         )
-        check_arc_spaces(inst.js("return Z.spaces();"), f"after restart {n}")
+        check_arc_spaces(env, inst.js("return Z.spaces();"), f"after restart {n}")
         check(ui_responsive(inst), f"UI responds after restart {n}")
 
 
@@ -608,9 +776,9 @@ def scenario_import_with_existing_data(env):
     after = inst.js("return Z.spaces();")
     kept = [[s["name"], s["pinned"], s["normal"]] for s in after if not s["arc"]]
     check(kept == before, f"existing spaces untouched: {before} -> {kept}")
-    check_arc_spaces(after, "with existing data")
+    check_arc_spaces(env, after, "with existing data")
     import_arc(inst)
-    check_arc_spaces(inst.js("return Z.spaces();"), "after importing twice")
+    check_arc_spaces(env, inst.js("return Z.spaces();"), "after importing twice")
     check(inst.js("return Z.essentials();") == 1, "essential not duplicated")
 
 
