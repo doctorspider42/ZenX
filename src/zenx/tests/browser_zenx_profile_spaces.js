@@ -285,3 +285,51 @@ add_task(async function test_cancel_pending_move() {
     "The space should stay here"
   );
 });
+
+add_task(async function test_space_menu_set_profile_like_arc() {
+  await TestUtils.waitForCondition(
+    () => document.documentElement.hasAttribute("zenx-profile-spaces"),
+    "The window knows spaces are bound to profiles"
+  );
+  const menu = document.getElementById("zenWorkspaceMoreActions");
+  const spaceButton = document.querySelector(
+    "#zen-workspaces-button toolbarbutton[zen-workspace-id]"
+  );
+  const shown = BrowserTestUtils.waitForPopupEvent(menu, "shown");
+  EventUtils.synthesizeMouseAtCenter(spaceButton, { type: "contextmenu" });
+  await shown;
+
+  Assert.ok(
+    !document
+      .getElementById("context_zenWorkspacesOpenInContainerTab")
+      .checkVisibility(),
+    "Zen's container picker (labelled 'Profile') is hidden"
+  );
+  const setProfile = document.getElementById(
+    "zenx-context-move-space-to-profile"
+  );
+  Assert.ok(setProfile.checkVisibility(), "Our Set Profile menu is shown");
+
+  const subShown = BrowserTestUtils.waitForPopupEvent(
+    setProfile.menupopup,
+    "shown"
+  );
+  setProfile.openMenu(true);
+  await subShown;
+  const items = [...setProfile.menupopup.querySelectorAll("menuitem")];
+  Assert.deepEqual(
+    items.map(item => item.getAttribute("label")),
+    ["Work", "Personal", "New Profile…"],
+    "Every profile is listed, New Profile last"
+  );
+  Assert.equal(items[0].getAttribute("checked"), "true", "Own profile checked");
+  Assert.equal(
+    items.at(-1).getAttribute("zenx-profile-id"),
+    "new",
+    "The last item creates a new profile"
+  );
+
+  const hidden = BrowserTestUtils.waitForPopupEvent(menu, "hidden");
+  menu.hidePopup();
+  await hidden;
+});

@@ -11,7 +11,7 @@ zenx-remote-space-button =
     .tooltiptext = { $space } — { $profile }
 
 zenx-move-space-to-profile =
-    .label = Move to Profile
+    .label = Set Profile
 zenx-move-space-new-profile =
     .label = New Profile…
 zenx-move-space-cancel =

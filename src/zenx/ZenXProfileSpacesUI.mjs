@@ -22,6 +22,9 @@ const { ZenXProfileSpaces } = ChromeUtils.importESModule(
 
 const STYLESHEET = "chrome://browser/content/zenx/zenx-profile-spaces.css";
 const ROOT_HAS_REMOTE_ATTR = "zenx-has-remote-spaces";
+// Set while spaces are bound to Firefox profiles. Zen's per-space container
+// picker (labelled "Profile" in Zen) is then hidden so the two don't mix up.
+const ROOT_PROFILE_SPACES_ATTR = "zenx-profile-spaces";
 
 class nsZenXProfileSpacesUI {
   #listener = () => this.#update();
@@ -90,6 +93,10 @@ class nsZenXProfileSpacesUI {
   // Mark: space switcher
 
   #update() {
+    document.documentElement.toggleAttribute(
+      ROOT_PROFILE_SPACES_ATTR,
+      ZenXProfileSpaces.available
+    );
     this.#renderRemoteSpaces();
     this.#renderPendingMoves();
   }
@@ -212,19 +219,22 @@ class nsZenXProfileSpacesUI {
       popup.appendChild(document.createXULElement("menuseparator"));
     }
 
+    // Like Arc: every profile, the space's own one checked.
     for (const profile of ZenXProfileSpaces.getProfiles()) {
-      if (profile.isCurrent) {
-        continue;
-      }
       const item = document.createXULElement("menuitem");
-      item.className = "menuitem-iconic";
       item.setAttribute("label", profile.name);
-      item.setAttribute("zenx-action", "move");
-      item.setAttribute("zenx-profile-id", profile.id);
-      if (profile.avatarURL) {
-        item.setAttribute("image", profile.avatarURL);
+      if (profile.isCurrent) {
+        item.setAttribute("type", "checkbox");
+        item.setAttribute("checked", "true");
+      } else {
+        item.className = "menuitem-iconic";
+        item.setAttribute("zenx-action", "move");
+        item.setAttribute("zenx-profile-id", profile.id);
+        if (profile.avatarURL) {
+          item.setAttribute("image", profile.avatarURL);
+        }
+        item.addEventListener("command", this);
       }
-      item.addEventListener("command", this);
       popup.appendChild(item);
     }
     if (popup.childElementCount) {

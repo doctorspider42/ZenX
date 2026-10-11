@@ -50,3 +50,10 @@
   margin-inline: 0;
   margin-block: 2px;
 }
+
+/* Spaces are bound to Firefox profiles: hide Zen's per-space container picker,
+ * which Zen labels "Profile" ("Set Profile" in the space menu, "Profile" in the
+ * space creation form). Containers still work for tabs. */
+:root[zenx-profile-spaces] :is(#context_zenWorkspacesOpenInContainerTab, .zen-workspace-creation-profile-wrapper) {
+  display: none !important;
+}
