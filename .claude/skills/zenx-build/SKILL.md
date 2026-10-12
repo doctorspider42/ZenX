@@ -82,7 +82,7 @@ Mozilla style: 2 spaces, double quotes, `arrowParens: "avoid"`, `trailingComma: 
 
 ## Releases
 
-Signed macOS releases come from `.github/workflows/zenx-release.yml`. Start it from Actions, or push a tag `zenx-build-<n>`. See "Releases and updates" in `docs/zenx.md`. Never regenerate the MAR signing key: installed copies only accept updates signed with the existing one.
+Signed macOS releases come from `scripts/zenx-release-local.sh`, which runs on the user's Mac: native, incremental, about 40 minutes the first time. `.github/workflows/zenx-release.yml` is the CI fallback (about 2.5 hours); start it from Actions or push a tag `zenx-build-<n>`. See "Releases and updates" in `docs/zenx.md`. Never regenerate the MAR signing key: installed copies only accept updates signed with the existing one.
 
 ## Troubleshooting
 

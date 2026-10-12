@@ -151,3 +151,20 @@ Secrets:
 - MAR signing: `ZENX_MAR_CERT_PEM_BASE64`, `ZENX_MAR_PRIVATE_KEY_PEM_BASE64`, `ZENX_MAR_PASSWORD`.
 
 **The MAR private key cannot be replaced.** Installed copies only accept updates signed with it. If it is lost, every user has to reinstall by hand.
+
+### Releasing from a Mac (faster)
+
+`scripts/zenx-release-local.sh` produces the same release on this Mac: a native, incremental build, then signing, notarization, the MAR and the manifest. It takes about 40 minutes the first time and a few minutes after that; CI needs about 2.5 hours.
+
+- It works in a separate git worktree, `~/Projects/ZenX-release` at `origin/dev`, so release builds never touch the development build.
+- It publishes the GitHub Release, including `update.xml`, and then starts `.github/workflows/zenx-publish-manifest.yml`. That workflow puts the manifest on GitHub Pages, which can only be deployed from Actions.
+- `--no-publish` stops after notarization.
+
+One-time setup:
+
+- `brew install gh gnu-tar nss`.
+- The Developer ID certificate, with its private key, in the login keychain.
+- Notarization credentials: `xcrun notarytool store-credentials zenx-notary --key AuthKey_….p8 --key-id … --issuer …`.
+- The MAR key in the keychain, as the items "ZenX MAR private key" and "ZenX MAR certificate" (account `zenx`, base64 PEM).
+
+`scripts/zenx-check-package.sh` checks a packaged app before it is signed: Zen's and ZenX's strings, ZenX modules, profile root and update URL. CI and the local script both run it.

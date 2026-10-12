@@ -1,0 +1,57 @@
+# ZenX: publish the update manifest of a release to GitHub Pages.
+#
+# Used by scripts/zenx-release-local.sh: a release built on a Mac uploads its
+# update.xml as a release asset, and this puts it where installed copies look
+# for updates:
+# https://doctorspider42.github.io/ZenX/updates/browser/Darwin_aarch64-gcc3/release/update.xml
+# (GitHub Pages can only be deployed from Actions.)
+
+name: ZenX - Publish update manifest
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, e.g. zenx-1.23.2b"
+        required: true
+        type: string
+
+concurrency:
+  group: zenx-pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'doctorspider42/ZenX'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Download the manifest
+        run: |
+          set -ex
+          gh release download "${{ inputs.tag }}" -R "$GITHUB_REPOSITORY" -p update.xml -D .
+          grep -q "releases/download/${{ inputs.tag }}/macos.mar" update.xml
+          mkdir -p site/updates/browser/Darwin_aarch64-gcc3/release
+          mv update.xml site/updates/browser/Darwin_aarch64-gcc3/release/update.xml
+          cat > site/index.html <<EOF
+          <!doctype html><meta charset="utf-8"><title>ZenX</title>
+          <p>ZenX update server. Downloads: <a href="https://github.com/$GITHUB_REPOSITORY/releases">GitHub Releases</a>.</p>
+          EOF
+          cat site/updates/browser/Darwin_aarch64-gcc3/release/update.xml
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: pages
+        uses: actions/deploy-pages@v4

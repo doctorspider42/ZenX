@@ -132,6 +132,11 @@ jobs:
       - name: Adapt for ZenX signing
         run: bash scripts/zenx-ci-prepare.sh
 
+      # Zen's and ZenX's English strings (zen*.ftl). Zen's CI copies them
+      # while downloading language packs, which ZenX skips for now.
+      - name: English strings
+        run: python3 scripts/update_en_US_packs.py
+
       - name: Bootstrap
         run: npm run bootstrap
 
@@ -226,6 +231,9 @@ jobs:
           APP=$(cd obj-aarch64-apple-darwin/dist && ls -d *.app | head -1)
           echo "APP=$APP" >> "$GITHUB_ENV"
           echo "App: $APP"
+
+      - name: Check the package
+        run: bash scripts/zenx-check-package.sh "engine/obj-aarch64-apple-darwin/dist/$APP"
 
       - name: Signing certificate
         run: |
