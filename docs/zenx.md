@@ -126,3 +126,27 @@ cd engine && ./mach python zenx/tests/e2e/zenx_e2e.py
 ```
 
 Add `-k <name>` to run one scenario and `--headed` to watch the windows.
+
+## Releases and updates (macOS)
+
+`.github/workflows/zenx-release.yml` builds, signs, notarizes and publishes ZenX for Apple Silicon. Start it from Actions (workflow_dispatch on `dev`) or by pushing a tag `zenx-build-<n>`. It has three jobs:
+
+1. **build** (Linux) cross-compiles ZenX for macOS the way Zen's CI does, without LTO or PGO so it fits a free runner. It ships English only for now.
+2. **sign** (macOS) signs the app with the Developer ID certificate (`mach macos-sign`), makes the DMG, notarizes and staples it, builds the update MAR from the signed app, and signs the MAR with ZenX's key.
+3. **publish** creates the GitHub Release `zenx-<version>` (DMG and `macos.mar`) and puts the update manifest on GitHub Pages at `https://doctorspider42.github.io/ZenX/updates/browser/Darwin_aarch64-gcc3/release/update.xml`.
+
+`<version>` is Zen's display version from `surfer.json`. A new build for the same version replaces the release files, and installed copies update because the build id is newer.
+
+`scripts/zenx-ci-prepare.sh` runs only in CI, after `npm run import`, and adapts Zen's release build. Each step fails loudly if Zen changes what it relies on:
+
+- puts our Apple Team ID where Zen hardcodes its own;
+- drops the entitlements that need a provisioning profile (application identifier and platform passkeys);
+- makes `macos-sign` work without a provisioning profile;
+- uses ZenX's MAR certificate (`build/zenx-signing/public_key.der`) instead of Zen's.
+
+Secrets:
+
+- Apple: `APPLE_TEAM_ID`, `APPLE_DEVELOPER_ID_P12_BASE64`, `APPLE_DEVELOPER_ID_P12_PASSWORD`, `APPLE_API_KEY_P8_BASE64`, `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`.
+- MAR signing: `ZENX_MAR_CERT_PEM_BASE64`, `ZENX_MAR_PRIVATE_KEY_PEM_BASE64`, `ZENX_MAR_PASSWORD`.
+
+**The MAR private key cannot be replaced.** Installed copies only accept updates signed with it. If it is lost, every user has to reinstall by hand.

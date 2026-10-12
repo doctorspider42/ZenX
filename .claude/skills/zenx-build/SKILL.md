@@ -80,6 +80,10 @@ npm run lc                                    # MPL license headers in src/
 
 Mozilla style: 2 spaces, double quotes, `arrowParens: "avoid"`, `trailingComma: "es5"`. Every new source file starts with the MPL-2.0 header (tests: public domain header).
 
+## Releases
+
+Signed macOS releases come from `.github/workflows/zenx-release.yml`. Start it from Actions, or push a tag `zenx-build-<n>`. See "Releases and updates" in `docs/zenx.md`. Never regenerate the MAR signing key: installed copies only accept updates signed with the existing one.
+
 ## Troubleshooting
 
 - **configure: `configure.py` not found / missing files in engine** → the Firefox tarball download was truncated. `rm -rf engine .surfer/engine/*.tar.xz && npm run download && npm run import`.
