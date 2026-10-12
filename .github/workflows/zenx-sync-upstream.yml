@@ -115,10 +115,11 @@ jobs:
             echo
             sed 's/^/- `/; s/$/`/' "$RUNNER_TEMP/conflicts.txt"
             echo
-            echo "Resolve locally:"
+            echo "Resolve on a branch and open a PR into \`$BASE_BRANCH\` (see the \`zenx-upstream-sync\` skill in \`.claude/skills\`):"
             echo
             echo '```bash'
-            echo "git fetch upstream && git checkout $BASE_BRANCH && git merge upstream/$UPSTREAM_BRANCH"
+            echo "git fetch upstream && git checkout $BASE_BRANCH && git pull"
+            echo "git checkout -b zenx/upstream-sync-manual && git merge upstream/$UPSTREAM_BRANCH"
             echo '```'
             echo
             echo "[Workflow run]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"

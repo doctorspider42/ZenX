@@ -675,6 +675,17 @@ class nsZenShareManager extends nsZenDOMOperatedFeature {
     }
   }
 
+  /**
+   * ZenX: imports a space document item (see share.schema.json) without the
+   * share overlay. Used to move spaces between Firefox profiles.
+   *
+   * @param {object} item a "space" item of a share document
+   * @returns {Promise<object|null>} the new workspace
+   */
+  importSpace(item) {
+    return this.#importSpace(item);
+  }
+
   async #importSpace(item) {
     const workspace = await gZenWorkspaces.createAndSaveWorkspace(
       item.name,
@@ -700,7 +711,7 @@ class nsZenShareManager extends nsZenDOMOperatedFeature {
       }
     );
     if (!workspace) {
-      return;
+      return null;
     }
     workspace.name = item.name;
     const theme = item.theme;
@@ -712,6 +723,7 @@ class nsZenShareManager extends nsZenDOMOperatedFeature {
     gZenWorkspaces.saveWorkspace(workspace);
     gZenThemePicker.onWorkspaceChange(workspace);
     gZenStartup.playWindowSweepAnimation();
+    return workspace;
   }
 
   #importGradientColor(color) {

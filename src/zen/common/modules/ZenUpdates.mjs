@@ -70,20 +70,30 @@ export async function createWindowUpdateAnimation() {
  */
 export async function playWindowSweepAnimation() {
   await gZenWorkspaces.promiseInitialized;
+  // ZenX: importing several spaces at once used to start overlapping sweeps.
+  // They animated by id, so some overlays were never removed and covered the
+  // window, swallowing every click. One sweep at a time, animate the
+  // elements themselves, always clean up, never take clicks.
+  if (document.getElementById("zen-update-animation")) {
+    return;
+  }
   const appWrapper = document.getElementById("zen-main-app-wrapper");
   const element = document.createElement("div");
   element.id = "zen-update-animation";
   const elementBorder = document.createElement("div");
   elementBorder.id = "zen-update-animation-border";
+  for (const el of [element, elementBorder]) {
+    el.style.pointerEvents = "none";
+  }
   requestIdleCallback(() => {
-    if (gReduceMotion) {
+    if (gReduceMotion || document.getElementById("zen-update-animation")) {
       return;
     }
     appWrapper.appendChild(element);
     appWrapper.appendChild(elementBorder);
     Promise.all([
       gZenUIManager.motion.animate(
-        "#zen-update-animation",
+        element,
         {
           top: ["100%", "-50%"],
           opacity: [0.5, 1],
@@ -93,7 +103,7 @@ export async function playWindowSweepAnimation() {
         }
       ),
       gZenUIManager.motion.animate(
-        "#zen-update-animation-border",
+        elementBorder,
         {
           "--background-top": ["150%", "-50%"],
         },
@@ -102,7 +112,7 @@ export async function playWindowSweepAnimation() {
           delay: 0.08,
         }
       ),
-    ]).then(() => {
+    ]).finally(() => {
       element.remove();
       elementBorder.remove();
     });

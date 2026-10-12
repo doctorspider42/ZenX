@@ -1,0 +1,24 @@
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+
+# ZenX: identity of the app, so it installs and runs next to Zen with its own
+# profiles, remoting name and bundle id.
+#
+# Surfer appends this file after Zen's configs/common and configs/<os>
+# mozconfigs (see `surfer build`), so these settings win over Zen's. Zen lists
+# /mozconfig in .gitignore and doesn't use it; ZenX tracks it on purpose
+# (`git add -f mozconfig`), which keeps upstream merges conflict free.
+
+ac_add_options --with-app-name=zenx
+ac_add_options --with-app-basename=ZenX
+export MOZ_APP_BASENAME=ZenX
+
+# The profile root (~/Library/Application Support/zenx, Zen uses .../zen) can't
+# be set here, see src/browser/moz-configure.patch.
+
+# macOS bundle id: <distribution id>.<MOZ_MACBUNDLE_ID> = com.doctorspider42.zenx
+ac_add_options --with-distribution-id=com.doctorspider42
+ac_add_options MOZ_MACBUNDLE_ID=zenx
+
+export MOZ_SOURCE_REPO=https://github.com/doctorspider42/ZenX

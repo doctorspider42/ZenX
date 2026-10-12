@@ -1,12 +1,13 @@
 diff --git a/testing/xpcshell/runxpcshelltests.py b/testing/xpcshell/runxpcshelltests.py
-index 403401613189ffb758037850dc6bbb1d55f194ab..cad28e245155eb54775e551885532026e56c5fa9 100755
+index 8913196573671a9a08fe3fc874613b561324ed4f..ab128718192604311ea7c81bb8db9a696246a7dc 100755
 --- a/testing/xpcshell/runxpcshelltests.py
 +++ b/testing/xpcshell/runxpcshelltests.py
-@@ -2275,6 +2275,9 @@ class XPCShellTests:
+@@ -2317,6 +2317,10 @@ class XPCShellTests:
          appDirKey = None
          if "appname" in self.mozInfo:
              appDirKey = self.mozInfo["appname"] + "-appdir"
-+            if appDirKey == "zen-appdir":
++            # ZenX: the app is called zenx.
++            if appDirKey in ("zen-appdir", "zenx-appdir"):
 +                # Inherited manifests use firefox-appdir.
 +                appDirKey = "firefox-appdir"
  

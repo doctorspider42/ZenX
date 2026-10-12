@@ -44,6 +44,9 @@ export default [
 
   "gZenSpaceRoutingManager",
 
+  // ZenX
+  "gZenXProfileSpaces",
+
   "Ci",
   "Cu",
   "Cc",

@@ -1,0 +1,341 @@
+{
+  "sidebar": {
+    "containers": [
+      {
+        "global": {}
+      },
+      {
+        "spaces": [
+          "work",
+          {
+            "id": "work",
+            "title": "Work",
+            "profile": {
+              "default": true
+            },
+            "newContainerIDs": [
+              {
+                "unpinned": {
+                  "_0": {
+                    "shared": {}
+                  }
+                }
+              },
+              "work-unpinned",
+              {
+                "pinned": {}
+              },
+              "work-pinned"
+            ],
+            "customInfo": {
+              "iconType": {
+                "emoji_v2": "💼",
+                "emoji": 128188
+              },
+              "windowTheme": {
+                "primaryColorPalette": {
+                  "midTone": {
+                    "red": 1,
+                    "green": 0.5,
+                    "blue": 0,
+                    "alpha": 1,
+                    "colorSpace": "sRGB"
+                  }
+                }
+              }
+            }
+          },
+          "fun",
+          {
+            "id": "fun",
+            "title": "Fun",
+            "profile": {
+              "custom": {
+                "_0": {
+                  "directoryBasename": "Profile 1"
+                }
+              }
+            },
+            "containerIDs": ["pinned", "fun-pinned", "unpinned", "missing"],
+            "customInfo": {
+              "iconType": {
+                "emoji": 127881
+              }
+            }
+          }
+        ],
+        "items": [
+          "work-pinned",
+          {
+            "id": "work-pinned",
+            "parentID": null,
+            "title": null,
+            "childrenIds": ["t-docs", "folder-1", "split-1"],
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "spaceItems": {
+                    "_0": "work"
+                  }
+                }
+              }
+            }
+          },
+          "t-docs",
+          {
+            "id": "t-docs",
+            "parentID": "work-pinned",
+            "title": "Docs",
+            "childrenIds": [],
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/docs",
+                "savedTitle": "Docs saved"
+              }
+            }
+          },
+          "folder-1",
+          {
+            "id": "folder-1",
+            "parentID": "work-pinned",
+            "title": "Projects",
+            "childrenIds": ["t-p1", "folder-2"],
+            "data": {
+              "list": {}
+            }
+          },
+          "t-p1",
+          {
+            "id": "t-p1",
+            "parentID": "folder-1",
+            "title": null,
+            "childrenIds": [],
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/p1",
+                "savedTitle": "t-p1 saved"
+              }
+            }
+          },
+          "folder-2",
+          {
+            "id": "folder-2",
+            "parentID": "folder-1",
+            "title": "Nested",
+            "childrenIds": ["t-p2", "easel-1"],
+            "data": {
+              "list": {}
+            }
+          },
+          "t-p2",
+          {
+            "id": "t-p2",
+            "parentID": "folder-2",
+            "title": null,
+            "childrenIds": [],
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/p2",
+                "savedTitle": "t-p2 saved"
+              }
+            }
+          },
+          "easel-1",
+          {
+            "id": "easel-1",
+            "parentID": "folder-2",
+            "title": "Board",
+            "childrenIds": [],
+            "data": {
+              "easel": {}
+            }
+          },
+          "split-1",
+          {
+            "id": "split-1",
+            "parentID": "work-pinned",
+            "title": null,
+            "childrenIds": [],
+            "data": {
+              "splitView": {
+                "layoutOrientation": "horizontal"
+              }
+            }
+          },
+          "t-s1",
+          {
+            "id": "t-s1",
+            "parentID": "split-1",
+            "title": null,
+            "childrenIds": [],
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/left",
+                "savedTitle": "t-s1 saved"
+              }
+            }
+          },
+          "t-s2",
+          {
+            "id": "t-s2",
+            "parentID": "split-1",
+            "title": null,
+            "childrenIds": [],
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/right",
+                "savedTitle": "t-s2 saved"
+              }
+            }
+          },
+          "work-unpinned",
+          {
+            "id": "work-unpinned",
+            "parentID": null,
+            "title": null,
+            "childrenIds": ["t-today", "t-arc"],
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "spaceItems": {
+                    "_0": "work"
+                  }
+                }
+              }
+            }
+          },
+          "t-today",
+          {
+            "id": "t-today",
+            "parentID": "work-unpinned",
+            "title": "Today",
+            "childrenIds": [],
+            "data": {
+              "tab": {
+                "savedURL": "https://example.org/today",
+                "savedTitle": "Today saved"
+              }
+            }
+          },
+          "t-arc",
+          {
+            "id": "t-arc",
+            "parentID": "work-unpinned",
+            "title": null,
+            "childrenIds": [],
+            "data": {
+              "tab": {
+                "savedURL": "arc://settings",
+                "savedTitle": "t-arc saved"
+              }
+            }
+          },
+          "fun-pinned",
+          {
+            "id": "fun-pinned",
+            "parentID": null,
+            "title": null,
+            "childrenIds": ["t-fun"],
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "spaceItems": {
+                    "_0": "fun"
+                  }
+                }
+              }
+            }
+          },
+          "t-fun",
+          {
+            "id": "t-fun",
+            "parentID": "fun-pinned",
+            "title": null,
+            "childrenIds": [],
+            "data": {
+              "tab": {
+                "savedURL": "https://example.net/fun",
+                "savedTitle": "t-fun saved"
+              }
+            }
+          },
+          "top-default",
+          {
+            "id": "top-default",
+            "parentID": null,
+            "title": null,
+            "childrenIds": ["t-fav"],
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "topApps": {
+                    "_0": {
+                      "default": true
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "t-fav",
+          {
+            "id": "t-fav",
+            "parentID": "top-default",
+            "title": "Mail",
+            "childrenIds": [],
+            "data": {
+              "tab": {
+                "savedURL": "https://example.com/mail",
+                "savedTitle": "Mail saved"
+              }
+            }
+          },
+          "top-p1",
+          {
+            "id": "top-p1",
+            "parentID": null,
+            "title": null,
+            "childrenIds": ["t-fav2"],
+            "data": {
+              "itemContainer": {
+                "containerType": {
+                  "topApps": {
+                    "_0": {}
+                  }
+                }
+              }
+            }
+          },
+          "t-fav2",
+          {
+            "id": "t-fav2",
+            "parentID": "top-p1",
+            "title": null,
+            "childrenIds": [],
+            "data": {
+              "tab": {
+                "savedURL": "https://example.net/chat",
+                "savedTitle": "t-fav2 saved"
+              }
+            }
+          }
+        ],
+        "topAppsContainerIDs": [
+          {
+            "default": true
+          },
+          "top-default",
+          {
+            "custom": {
+              "_0": {
+                "directoryBasename": "Profile 1"
+              }
+            }
+          },
+          "top-p1"
+        ]
+      }
+    ]
+  },
+  "version": 1
+}

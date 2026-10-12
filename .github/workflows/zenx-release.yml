@@ -1,0 +1,390 @@
+# ZenX: build, sign, notarize and publish ZenX for macOS (Apple Silicon).
+#
+# 1. build   (Linux)  cross-compiles ZenX for macOS like Zen's own CI, without
+#                     LTO/PGO so it fits a free runner's time limit.
+# 2. sign    (macOS)  signs the app with the Developer ID certificate, makes
+#                     the DMG, notarizes and staples it, builds the update MAR
+#                     from the signed app and signs it with ZenX's MAR key.
+# 3. publish (Linux)  GitHub Release `zenx-<version>` (DMG + macos.mar) and
+#                     the update manifest on GitHub Pages, where the app looks
+#                     for updates:
+#                     https://doctorspider42.github.io/ZenX/updates/browser/Darwin_aarch64-gcc3/release/update.xml
+#
+# <version> is Zen's display version from surfer.json. Building again for the
+# same version replaces the release's files; installed copies update because
+# the build id is newer.
+#
+# Secrets: APPLE_TEAM_ID, APPLE_DEVELOPER_ID_P12_BASE64,
+# APPLE_DEVELOPER_ID_P12_PASSWORD, APPLE_API_KEY_P8_BASE64, APPLE_API_KEY_ID,
+# APPLE_API_ISSUER_ID, ZENX_MAR_CERT_PEM_BASE64, ZENX_MAR_PRIVATE_KEY_PEM_BASE64,
+# ZENX_MAR_PASSWORD. The MAR certificate's public part is
+# build/zenx-signing/public_key.der.
+
+name: ZenX - Release (macOS)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "zenx-build-*"
+
+concurrency:
+  group: zenx-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    name: Version
+    if: github.repository == 'doctorspider42/ZenX'
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: echo "version=$(jq -r .brands.release.release.displayVersion surfer.json)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build macOS (aarch64)
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 355
+    env:
+      SURFER_COMPAT: aarch64
+      SURFER_PLATFORM: darwin
+      ZEN_CROSS_COMPILING: 1
+      ZEN_GA_DISABLE_PGO: 1
+      ZEN_DISABLE_LTO: 1
+      ZEN_RELEASE_BRANCH: release
+      SCCACHE_GHA_ENABLED: "true"
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: 0
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: true
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - name: sccache
+        uses: mozilla-actions/sccache-action@v0.0.9
+
+      - name: Expose actions cache variables
+        uses: actions/github-script@v7
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env['ACTIONS_CACHE_URL'] || '')
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env['ACTIONS_RUNTIME_TOKEN'] || '')
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          sudo apt-get update
+          sudo apt-get install -y python3 python3-pip zstd yasm nasm build-essential libgtk2.0-dev libpython3-dev m4 uuid libasound2-dev libcurl4-openssl-dev libdbus-1-dev libdrm-dev libdbus-glib-1-dev libgtk-3-dev libpulse-dev libx11-xcb-dev libxt-dev xvfb --fix-missing
+
+      - name: Surfer CI setup
+        run: npm run surfer -- ci --brand release --display-version ${{ needs.version.outputs.version }}
+
+      - name: Download Firefox
+        run: npm run download
+
+      - name: Cache macOS cross tools
+        id: cache-mac-cross
+        uses: actions/cache@v4
+        with:
+          path: ~/mac-cross
+          key: mac-cross-v1
+
+      - name: Setup macOS cross tools (cctools, DMG tools)
+        if: steps.cache-mac-cross.outputs.cache-hit != 'true'
+        run: |
+          set -ex
+          mkdir -p ~/mac-cross
+          cd engine
+          ./mach artifact toolchain --from-build linux64-cctools-port linux64-libdmg linux64-hfsplus
+          mv cctools dmg hfsplus ~/mac-cross/
+
+      - name: Setup Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain $(cat .rust-toolchain)
+          source $HOME/.cargo/env
+          rustup target add aarch64-apple-darwin
+
+      - name: Import patches
+        run: |
+          . "$HOME/.cargo/env"
+          npm run import -- --verbose
+
+      - name: Adapt for ZenX signing
+        run: bash scripts/zenx-ci-prepare.sh
+
+      - name: Bootstrap
+        run: npm run bootstrap
+
+      - name: Build
+        run: bash .github/workflows/src/release-build.sh
+
+      # `npm run package` would also package every language, which needs the
+      # language packs Zen's CI downloads first; ZenX ships English for now.
+      - name: Package
+        env:
+          ZEN_RELEASE: 1
+        run: cd engine && ./mach package
+
+      - name: Collect
+        run: |
+          set -ex
+          mkdir out
+          mv engine/obj-aarch64-apple-darwin/dist/*.dmg out/zenx-aarch64-unsigned.dmg
+          cp engine/obj-aarch64-apple-darwin/dist/bin/platform.ini out/
+          cp engine/obj-aarch64-apple-darwin/dist/bin/signmar out/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenx-macos-unsigned
+          path: out/
+          retention-days: 3
+
+  sign:
+    name: Sign, notarize, package updates
+    needs: [version, build]
+    runs-on: macos-15
+    timeout-minutes: 150
+    env:
+      SURFER_COMPAT: aarch64
+      SURFER_PLATFORM: darwin
+      ZEN_RELEASE: 1
+      ZEN_GA_DISABLE_PGO: 1
+      ZEN_DISABLE_LTO: 1
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ".nvmrc"
+
+      - uses: actions/setup-python@v5
+
+      - name: System dependencies
+        run: |
+          brew install gnu-tar nss
+          echo "$(brew --prefix gnu-tar)/libexec/gnubin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix nss)/bin" >> "$GITHUB_PATH"
+          cargo install apple-codesign --locked
+
+      - name: Prepare the source tree
+        run: |
+          set -ex
+          npm ci
+          npm run surfer -- ci --brand release --display-version "$VERSION"
+          npm run download
+          (cd engine && ./mach --no-interactive bootstrap --application-choice browser --no-system-changes || true)
+          npm run import
+          bash scripts/zenx-ci-prepare.sh
+          SURFER_MOZCONFIG_ONLY=true npm run build
+          (cd engine && ./mach configure)
+
+      - name: Build host mar tool
+        run: |
+          set -ex
+          cd engine
+          echo "ac_add_options --enable-project=tools/update-packaging" > mar-mozconfig
+          echo "mk_add_options MOZ_OBJDIR=@TOPSRCDIR@/obj-mar-tools" >> mar-mozconfig
+          MOZCONFIG=$PWD/mar-mozconfig ./mach build -v
+          cp obj-mar-tools/dist/host/bin/mar ../zenx-host-mar
+          rm -rf obj-mar-tools mar-mozconfig
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: zenx-macos-unsigned
+          path: unsigned
+
+      - name: Extract the app
+        run: |
+          set -ex
+          rm -rf engine/obj-aarch64-apple-darwin/dist
+          mkdir -p engine/obj-aarch64-apple-darwin/dist/bin
+          cd engine
+          ./mach python -m mozbuild.action.unpack_dmg ../unsigned/zenx-aarch64-unsigned.dmg ./obj-aarch64-apple-darwin/dist
+          cp ../unsigned/platform.ini obj-aarch64-apple-darwin/dist/bin/platform.ini
+          APP=$(cd obj-aarch64-apple-darwin/dist && ls -d *.app | head -1)
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          echo "App: $APP"
+
+      - name: Signing certificate
+        run: |
+          echo "${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}" | base64 --decode > engine/zenx-cert.p12
+          printf '%s' "${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}" > engine/zenx-cert.passwd
+
+      - name: Import the certificate into a keychain
+        uses: Apple-Actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_DEVELOPER_ID_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+
+      - name: Sign the app
+        run: |
+          set -ex
+          cd engine
+          ./mach macos-sign -v -r -c release -e production -a "./obj-aarch64-apple-darwin/dist/$APP" \
+            --rcodesign-p12-file zenx-cert.p12 --rcodesign-p12-password-file zenx-cert.passwd
+          codesign --verify --deep --strict --verbose=2 "./obj-aarch64-apple-darwin/dist/$APP"
+
+      - name: Make, sign and notarize the DMG
+        run: |
+          set -ex
+          cd engine
+          ./mach python -m mozbuild.action.make_dmg \
+            --volume-name "ZenX" \
+            --background ./browser/branding/release/background.png \
+            --icon ./browser/branding/release/firefox.icns \
+            --dsstore ./browser/branding/release/dsstore \
+            ./obj-aarch64-apple-darwin/dist/ ../zenx-temp.dmg
+          cd ..
+          DMG="ZenX-$VERSION-macos-arm64.dmg"
+          hdiutil convert zenx-temp.dmg -format UDZO -imagekey zlib-level=9 -o "$DMG"
+          codesign -s "$APPLE_TEAM_ID" --timestamp "$DMG"
+          echo "${{ secrets.APPLE_API_KEY_P8_BASE64 }}" | base64 --decode > AuthKey.p8
+          xcrun notarytool submit "$DMG" \
+            --key AuthKey.p8 \
+            --key-id "${{ secrets.APPLE_API_KEY_ID }}" \
+            --issuer "${{ secrets.APPLE_API_ISSUER_ID }}" \
+            --wait
+          xcrun stapler staple "$DMG"
+          spctl --assess --type open --context context:primary-signature --verbose "$DMG"
+          echo "DMG=$DMG" >> "$GITHUB_ENV"
+
+      - name: Package the update (MAR)
+        env:
+          JUST_MAR: true
+        run: |
+          set -ex
+          export MAR="$PWD/zenx-host-mar"
+          chmod +x "$MAR"
+          npm run package -- --verbose
+          mv ./dist/output.mar ./macos-unsigned.mar
+
+      - name: Sign the update with ZenX's MAR key
+        run: |
+          set -ex
+          WORK="$RUNNER_TEMP/mar-signing"
+          mkdir -p "$WORK/nss"
+          echo "${{ secrets.ZENX_MAR_CERT_PEM_BASE64 }}" | base64 --decode > "$WORK/cert.pem"
+          echo "${{ secrets.ZENX_MAR_PRIVATE_KEY_PEM_BASE64 }}" | base64 --decode > "$WORK/key.pem"
+          PW="${{ secrets.ZENX_MAR_PASSWORD }}"
+          certutil -N -d "$WORK/nss" --empty-password
+          openssl pkcs12 -export -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -name mar_sig \
+            -passout pass:"$PW" -out "$WORK/key.p12"
+          pk12util -i "$WORK/key.p12" -d "$WORK/nss" -W "$PW" -K ""
+          # signmar comes from the build; it needs NSS from the app.
+          chmod +x unsigned/signmar
+          export DYLD_LIBRARY_PATH="$PWD/engine/obj-aarch64-apple-darwin/dist/$APP/Contents/MacOS"
+          unsigned/signmar -d "$WORK/nss" -n mar_sig -s macos-unsigned.mar macos.mar
+          unsigned/signmar -d "$WORK/nss" -n mar_sig -v macos.mar
+          rm -rf "$WORK" macos-unsigned.mar
+
+      - name: Update manifest
+        run: |
+          set -ex
+          # Only Apple Silicon is built; the manifest points at this release
+          # and describes the signed MAR.
+          python3 - <<'EOF'
+          import glob, hashlib, os, re, shutil
+          version = os.environ["VERSION"]
+          mar = "macos.mar"
+          data = open(mar, "rb").read()
+          sha = hashlib.sha512(data).hexdigest()
+          for path in glob.glob("dist/update/browser/*/release/update.xml"):
+              target = path.split("/")[3]
+              if target != "Darwin_aarch64-gcc3":
+                  shutil.rmtree(os.path.dirname(os.path.dirname(path)))
+                  continue
+              xml = open(path).read()
+              xml = re.sub(r'URL="[^"]*"', f'URL="https://github.com/doctorspider42/ZenX/releases/download/zenx-{version}/macos.mar"', xml)
+              xml = re.sub(r'hashValue="[^"]*"', f'hashValue="{sha}"', xml)
+              xml = re.sub(r'size="[^"]*"', f'size="{len(data)}"', xml)
+              open(path, "w").write(xml)
+              print(xml)
+          EOF
+          mkdir -p release
+          mv "$DMG" macos.mar release/
+          cp -R dist/update release/update
+
+      - name: Remove signing material
+        if: always()
+        run: |
+          rm -f engine/zenx-cert.p12 engine/zenx-cert.passwd AuthKey.p8
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zenx-macos-release
+          path: release/
+          retention-days: 7
+
+  publish:
+    name: Publish
+    needs: [version, sign]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.pages.outputs.page_url }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: zenx-macos-release
+          path: release
+
+      - name: GitHub Release
+        run: |
+          set -ex
+          TAG="zenx-$VERSION"
+          if gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/*.dmg release/macos.mar --clobber -R "$GITHUB_REPOSITORY"
+          else
+            gh release create "$TAG" release/*.dmg release/macos.mar -R "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" --title "ZenX $VERSION" \
+              --notes "ZenX $VERSION for macOS (Apple Silicon), based on Zen $VERSION. Signed and notarized; installed copies update automatically."
+          fi
+
+      - name: Update site
+        run: |
+          set -ex
+          mkdir -p site
+          cp -R release/update site/updates
+          cat > site/index.html <<EOF
+          <!doctype html><meta charset="utf-8"><title>ZenX</title>
+          <p>ZenX update server. Downloads: <a href="https://github.com/$GITHUB_REPOSITORY/releases">GitHub Releases</a>.</p>
+          EOF
+          find site -type f
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: pages
+        uses: actions/deploy-pages@v4

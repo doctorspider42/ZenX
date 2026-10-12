@@ -720,6 +720,12 @@ class nsZenFolders extends nsZenDOMOperatedFeature {
     });
 
     gBrowser.pinTab(emptyTab);
+    // ZenX: the empty tab is the folder's first tab, and the session store
+    // restores the folder into that tab's space. Without this a folder made
+    // in a space other than the active one came back in the active space.
+    if (options.workspaceId) {
+      emptyTab.setAttribute("zen-workspace-id", options.workspaceId);
+    }
     tabs = [emptyTab, ...filteredTabs];
 
     const folder = this._createFolderNode(options);

@@ -1,0 +1,68 @@
+/* This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+
+/* With spaces in other profiles the switcher is needed even when this profile
+ * has a single space. */
+:root[zenx-has-remote-spaces] #zen-workspaces-button[dont-show="true"] {
+  display: flex !important;
+}
+
+#zen-workspaces-button {
+  & .zenx-remote-spaces-separator {
+    flex-shrink: 0;
+    align-self: center;
+    width: 1px;
+    height: 14px;
+    margin-inline: 2px;
+    background: light-dark(rgba(0, 0, 0, 0.2), rgba(255, 255, 255, 0.2));
+  }
+
+  /* Spaces of other profiles: a bar in the profile's color under the icon.
+   * Drawn as a background, ::after is Zen's compact-mode dot. */
+  & toolbarbutton.zenx-remote-space {
+    background-image: linear-gradient(var(--zenx-profile-color, currentColor), var(--zenx-profile-color, currentColor));
+    background-size: 40% 2px;
+    background-position: center bottom 3px;
+    background-repeat: no-repeat;
+  }
+
+  /* A space sent to another profile and not adopted there yet. */
+  & toolbarbutton[zenx-moving] {
+    opacity: 0.35;
+  }
+}
+
+/* Collapsed sidebar: the switcher is vertical. */
+:root:not([zen-sidebar-expanded="true"]) #zen-workspaces-button .zenx-remote-spaces-separator {
+  width: 14px;
+  height: 1px;
+  margin-inline: 0;
+  margin-block: 2px;
+}
+
+/* Spaces are bound to Firefox profiles: hide Zen's per-space container picker,
+ * which Zen labels "Profile" ("Set Profile" in the space menu, "Profile" in the
+ * space creation form). Containers still work for tabs. */
+:root[zenx-profile-spaces] :is(#context_zenWorkspacesOpenInContainerTab, .zen-workspace-creation-profile-wrapper) {
+  display: none !important;
+}
+
+/* Profiles are managed only from a space's "Set Profile" menu. Firefox's own
+ * profile UI (switching, creating, copying, managing) mixes them up. */
+:root[zenx-profile-spaces]
+  :is(
+    #appMenu-profiles-button,
+    #profiles-menu,
+    #PanelUI-fxa-menu-profiles-header-label,
+    #PanelUI-fxa-menu-profile-buttons,
+    #PanelUI-fxa-menu-profiles-separator,
+    #PanelUI-fxa-menu-all-profiles-create-button,
+    #PanelUI-fxa-menu-all-profiles-manage-button,
+    #PanelUI-fxa-menu-create-profile-footer-separator,
+    #PanelUI-fxa-menu-create-profile-learn-more-button,
+    #PanelUI-fxa-menu-create-profile-copy-button,
+    #PanelUI-fxa-menu-create-profile-manage-button
+  ) {
+  display: none !important;
+}
