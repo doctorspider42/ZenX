@@ -24,6 +24,7 @@ Zen files that ZenX changes today:
 
 | File | Change |
 | --- | --- |
+| `README.md` | ZenX section at the top, above Zen's README (kept there so upstream edits to Zen's text merge cleanly) |
 | `src/zen/moz.build` | builds `../zenx` |
 | `src/zen/common/ZenPreloadedScripts.js` | loads `ZenXProfileSpacesUI.mjs` in browser windows |
 | `src/zen/zen.globals.mjs` | lint global `gZenXProfileSpaces` |

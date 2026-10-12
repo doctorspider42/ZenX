@@ -3,6 +3,39 @@
    - License, v. 2.0. If a copy of the MPL was not distributed with this
    - file, You can obtain one at http://mozilla.org/MPL/2.0/.
    -->
+<!-- ZenX: fork notice. Kept above Zen's README so upstream merges stay clean. -->
+
+# ZenX
+
+**ZenX is a fork of [Zen Browser](https://github.com/zen-browser/desktop)** that adds the Arc-style features we missed. It merges upstream Zen every day, so you get Zen's updates too. It is not affiliated with the Zen team.
+
+[![Release](https://github.com/doctorspider42/ZenX/actions/workflows/zenx-release.yml/badge.svg)](https://github.com/doctorspider42/ZenX/actions/workflows/zenx-release.yml)
+[![Sync with Zen](https://github.com/doctorspider42/ZenX/actions/workflows/zenx-sync-upstream.yml/badge.svg)](https://github.com/doctorspider42/ZenX/actions/workflows/zenx-sync-upstream.yml)
+
+### What's different from Zen
+
+- **Spaces in separate profiles, like Arc.** Every space belongs to a browser profile. Extensions, history, cookies and logins are shared only by the spaces of one profile.
+  - Right-click a space → **Set Profile** to move it to another profile, or to a new one.
+  - The space switcher shows the spaces of all profiles in one shared order. Clicking a space of another profile brings that profile's window to the front.
+- **Import from Arc.** Arc appears in the import wizard. Your spaces come over with their names, emoji and colors. **Pinned tabs stay pinned tabs** (not bookmarks), folders and split views are kept, and favorites become essentials.
+- **Installs next to Zen.** ZenX has its own app, profiles (`~/Library/Application Support/zenx`) and bundle id (`com.doctorspider42.zenx`).
+- **Signed, notarized builds with automatic updates** from this repository's releases.
+- Fixes found while building ZenX, worth sending to Zen as well:
+  - folders created in a space that isn't active landed in the wrong space after a restart;
+  - importing several spaces at once could leave invisible overlays that blocked every click.
+
+### Download
+
+macOS (Apple Silicon): [latest release](https://github.com/doctorspider42/ZenX/releases). ZenX updates itself after you install it.
+
+### Development
+
+[docs/zenx.md](docs/zenx.md) describes how ZenX is built on top of Zen and how it keeps up with upstream. It also lists every Zen file ZenX touches and how releases work. Guides for coding agents are in [`.claude/skills`](.claude/skills).
+
+---
+
+*The rest of this README is Zen's own.*
+
 <!-- TODO: Get a job -->
 <img src="./docs/assets/zen-dark.svg" width="100px" align="left">
 
