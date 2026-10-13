@@ -174,6 +174,26 @@ add_task(function test_several_containers() {
   );
 });
 
+add_task(function test_named_icons() {
+  const iconOf = icon => {
+    const sidebar = structuredClone(fixture);
+    const work = sidebar.sidebar.containers[1].spaces[1];
+    work.customInfo.iconType = { icon };
+    return parseArcSidebar(sidebar).spaces[0].icon;
+  };
+  Assert.equal(
+    iconOf("planet"),
+    "chrome://browser/skin/zen-icons/selectable/planet.svg",
+    "Arc icons with a Zen icon of the same name use it"
+  );
+  Assert.equal(
+    iconOf("bolt.fill"),
+    "chrome://browser/skin/zen-icons/selectable/lightning.svg",
+    "Other SF Symbols use a similar Zen icon"
+  );
+  Assert.equal(iconOf("unknown.symbol"), undefined);
+});
+
 add_task(function test_not_an_arc_file() {
   Assert.throws(() => parseArcSidebar({}), /Not an Arc sidebar file/);
 });

@@ -200,7 +200,8 @@ def synthetic_arc():
                 + (2 if has_split else 0)
             )
             expected[title or "Space"] = {
-                "icon": emoji,
+                "icon": emoji
+                or "chrome://browser/skin/zen-icons/selectable/planet.svg",
                 "pinned": n_pinned,
                 "normal": unpinned,
                 "folders": n_folders,
@@ -839,6 +840,19 @@ def scenario_import_with_existing_data(env):
     kept = [[s["name"], s["pinned"], s["normal"]] for s in after if not s["arc"]]
     check(kept == before, f"existing spaces untouched: {before} -> {kept}")
     check_arc_spaces(env, after, "with existing data")
+    # Imports by older versions left Arc's symbol icons out; importing again
+    # fills them in.
+    inst.js(
+        """
+        const win = await Z.ready();
+        for (const space of win.gZenWorkspaces.getWorkspaces()) {
+          if (space.zenxArcId && space.icon?.startsWith("chrome:")) {
+            space.icon = null;
+            win.gZenWorkspaces.saveWorkspace(space);
+          }
+        }
+        """
+    )
     import_arc(inst)
     check_arc_spaces(env, inst.js("return Z.spaces();"), "after importing twice")
     check(inst.js("return Z.essentials();") == 1, "essential not duplicated")

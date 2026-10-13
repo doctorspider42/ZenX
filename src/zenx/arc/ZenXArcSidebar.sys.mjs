@@ -68,6 +68,126 @@ function spaceContainers(space) {
   return result;
 }
 
+// Zen's icons for spaces (browser/themes/shared/zen-icons/common/selectable).
+const ZEN_SELECTABLE_ICONS = new Set([
+  "airplane",
+  "american-football",
+  "baseball",
+  "basket",
+  "bed",
+  "bell",
+  "book",
+  "bookmark",
+  "briefcase",
+  "brush",
+  "bug",
+  "build",
+  "cafe",
+  "call",
+  "card",
+  "chat",
+  "checkbox",
+  "circle",
+  "cloud",
+  "code",
+  "coins",
+  "construct",
+  "cutlery",
+  "egg",
+  "extension-puzzle",
+  "eye",
+  "fast-food",
+  "fish",
+  "flag",
+  "flame",
+  "flask",
+  "folder",
+  "game-controller",
+  "globe",
+  "grid-2x2",
+  "grid-3x3",
+  "heart",
+  "ice-cream",
+  "image",
+  "inbox",
+  "key",
+  "layers",
+  "leaf",
+  "lightning",
+  "location",
+  "lock-closed",
+  "mail",
+  "map",
+  "megaphone",
+  "moon",
+  "music",
+  "navigate",
+  "page",
+  "palette",
+  "paw",
+  "people",
+  "pizza",
+  "planet",
+  "present",
+  "rocket",
+  "school",
+  "shapes",
+  "shirt",
+  "square",
+  "squares",
+  "star",
+  "stats-chart",
+  "sun",
+  "tada",
+  "terminal",
+  "ticket",
+  "time",
+  "trash",
+  "triangle",
+  "video",
+  "wallet",
+  "warning",
+  "water",
+  "weight",
+]);
+
+// Arc's named space icons (mostly SF Symbol names) that Zen calls differently.
+const ARC_ICON_ALIASES = {
+  bolt: "lightning",
+  "bolt.fill": "lightning",
+  "book.closed": "book",
+  "bubble.left": "chat",
+  "bubble.left.and.bubble.right": "chat",
+  cart: "basket",
+  "chart.bar": "stats-chart",
+  "chevron.left.forwardslash.chevron.right": "code",
+  clock: "time",
+  creditcard: "card",
+  "cup.and.saucer": "cafe",
+  "doc.text": "page",
+  envelope: "mail",
+  "fork.knife": "cutlery",
+  gamecontroller: "game-controller",
+  gift: "present",
+  graduationcap: "school",
+  hammer: "construct",
+  ladybug: "bug",
+  lock: "lock-closed",
+  "moon.stars": "moon",
+  "music.note": "music",
+  paintbrush: "brush",
+  paintpalette: "palette",
+  pawprint: "paw",
+  person: "people",
+  "person.2": "people",
+  phone: "call",
+  photo: "image",
+  sparkles: "star",
+  "sun.max": "sun",
+  tray: "inbox",
+  "wrench.and.screwdriver": "construct",
+};
+
 function spaceIcon(space) {
   const iconType = space.customInfo?.iconType ?? {};
   if (typeof iconType.emoji_v2 === "string" && iconType.emoji_v2) {
@@ -80,8 +200,11 @@ function spaceIcon(space) {
       return undefined;
     }
   }
-  // Named Arc icons (SF Symbols) have no equivalent.
-  return undefined;
+  const name = typeof iconType.icon === "string" ? iconType.icon : "";
+  const zenIcon = ARC_ICON_ALIASES[name] ?? name.replace(/\.fill$/, "");
+  return ZEN_SELECTABLE_ICONS.has(zenIcon)
+    ? `chrome://browser/skin/zen-icons/selectable/${zenIcon}.svg`
+    : undefined;
 }
 
 function toByte(component) {

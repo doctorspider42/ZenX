@@ -78,15 +78,21 @@ export async function importArcIntoWindow(
 
   const result = { spaces: 0, tabs: 0, essentials: 0 };
   const previousSpace = gZenWorkspaces.activeWorkspace;
-  const alreadyImported = new Set(
+  const alreadyImported = new Map(
     gZenWorkspaces
       .getWorkspaces()
-      .map(space => space.zenxArcId)
-      .filter(Boolean)
+      .filter(space => space.zenxArcId)
+      .map(space => [space.zenxArcId, space])
   );
 
   for (const space of aParsed.spaces) {
-    if (alreadyImported.has(space.arcId)) {
+    const existing = alreadyImported.get(space.arcId);
+    if (existing) {
+      // Icons older versions couldn't import.
+      if (!existing.icon && space.icon) {
+        existing.icon = space.icon;
+        gZenWorkspaces.saveWorkspace(existing);
+      }
       continue;
     }
     const workspace = await gZenShareManager.importSpace({
