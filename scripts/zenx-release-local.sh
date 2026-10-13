@@ -164,7 +164,9 @@ openssl pkcs12 -export -inkey "$WORK/key.pem" -in "$WORK/cert.pem" -name mar_sig
 pk12util -i "$WORK/key.p12" -d "$WORK/nss" -W "$P12_PASSWORD" -K "" >/dev/null
 rm -f "$WORK/key.pem" "$WORK/key.p12"
 DYLD_LIBRARY_PATH="$APP/Contents/MacOS" "$OBJ/dist/bin/signmar" -d "$WORK/nss" -n mar_sig -s "$OUT/unsigned.mar" "$OUT/macos.mar"
-DYLD_LIBRARY_PATH="$APP/Contents/MacOS" "$OBJ/dist/bin/signmar" -d "$WORK/nss" -n mar_sig -v "$OUT/macos.mar"
+# macOS signmar verifies with the Security framework, from a DER file: the
+# certificate embedded in the app's updater.
+DYLD_LIBRARY_PATH="$APP/Contents/MacOS" "$OBJ/dist/bin/signmar" -D build/zenx-signing/public_key.der -v "$OUT/macos.mar"
 rm -f "$OUT/unsigned.mar"
 
 step "Update manifest"

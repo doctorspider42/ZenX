@@ -304,7 +304,9 @@ jobs:
           chmod +x unsigned/signmar
           export DYLD_LIBRARY_PATH="$PWD/engine/obj-aarch64-apple-darwin/dist/$APP/Contents/MacOS"
           unsigned/signmar -d "$WORK/nss" -n mar_sig -s macos-unsigned.mar macos.mar
-          unsigned/signmar -d "$WORK/nss" -n mar_sig -v macos.mar
+          # macOS signmar verifies with the Security framework, from a DER
+          # file: the certificate embedded in the app's updater.
+          unsigned/signmar -D build/zenx-signing/public_key.der -v macos.mar
           rm -rf "$WORK" macos-unsigned.mar
 
       - name: Update manifest
