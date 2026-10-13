@@ -74,8 +74,11 @@ echo "ZenX $VERSION (Firefox $FF_VERSION), commit $COMMIT, signing as $IDENTITY"
 step "Dependencies"
 npm ci --no-audit --no-fund --loglevel=error
 
-if [ -f engine/browser/config/version.txt ] && [ "$(cat engine/browser/config/version.txt)" != "$FF_VERSION" ]; then
-  step "Firefox changed to $FF_VERSION, starting from a fresh source tree"
+# The Firefox version the source tree was downloaded for (Zen rewrites
+# browser/config/version.txt, so that file can't tell).
+STAMP=.surfer/zenx-engine-firefox-version
+if [ -d engine ] && [ "$(cat "$STAMP" 2>/dev/null)" != "$FF_VERSION" ]; then
+  step "No complete Firefox $FF_VERSION source tree, starting from a fresh one"
   rm -rf engine
 fi
 if [ ! -d engine ]; then
@@ -84,6 +87,7 @@ if [ ! -d engine ]; then
   CACHED="$REPO/.surfer/engine/firefox-$FF_VERSION.source.tar.xz"
   [ -f "$CACHED" ] && cp "$CACHED" .surfer/engine/
   npm run download
+  echo "$FF_VERSION" >"$STAMP"
 fi
 
 step "Patches"
