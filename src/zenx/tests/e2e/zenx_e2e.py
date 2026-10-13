@@ -63,7 +63,9 @@ def synthetic_arc():
     A synthetic Arc sidebar shaped like a real one: several spaces in the
     default Arc profile (with folders, nested folders, a split view, unpinned
     tabs and favorites), plus a space in a second Arc profile that must not be
-    imported. Returns (sidebar JSON, expected spaces by name).
+    imported with them. Like newer Arc versions, Little Arc's untitled space
+    sits in a container of its own before the main one. Returns (sidebar
+    JSON, expected spaces by name).
     """
     items, spaces, expected = [], [], {}
     counter = [0]
@@ -215,9 +217,33 @@ def synthetic_arc():
     })
     fav_tab = tab(fav_default, 0)
     items[items.index(fav_default) + 1]["childrenIds"] = [fav_tab]
+
+    main_items = items
+    items = []
+    little_children = []
+    little_unpinned = container("little", little_children)
+    little_children.append(tab(little_unpinned, 0))
+    little = {
+        "spaces": [
+            "little",
+            {
+                "id": "little",
+                "profile": {"default": True},
+                "newContainerIDs": [
+                    {"unpinned": {"_0": {"shared": {}}}},
+                    little_unpinned,
+                ],
+            },
+        ],
+        "items": items,
+        "topAppsContainerIDs": [],
+    }
+    items = main_items
     sidebar = {
         "sidebar": {
             "containers": [
+                {"littleBrowser": {}},
+                little,
                 {"global": {}},
                 {
                     "spaces": spaces,
@@ -607,11 +633,11 @@ class Env:
 # Mark: scenario steps
 
 
-def import_arc(inst, arc_profile="Default"):
+def import_arc(inst, arc_profile="Default", timeout_ms=30000):
     """Imports Arc through the import wizard UI, spaces only."""
     return inst.js(
         """
-        const [arcProfile] = args;
+        const [arcProfile, timeoutMs] = args;
         const win = await Z.ready();
         const { MigrationUtils } = Z.module("resource:///modules/MigrationUtils.sys.mjs");
         const ready = new Promise(r => win.addEventListener("MigrationWizard:Ready", r, { once: true }));
@@ -642,10 +668,10 @@ def import_arc(inst, arc_profile="Default"):
         const t0 = Date.now();
         importButton.click();
         await Z.until(() => shadow.querySelector("named-deck, deck")?.getAttribute("selected-view") !== "page-selection", "the import to start", 10000);
-        const finished = await Promise.race([done.then(() => true), Z.sleep(30000).then(() => false)]);
+        const finished = await Promise.race([done.then(() => true), Z.sleep(timeoutMs).then(() => false)]);
         if (!finished) {
           const ws = win.gZenWorkspaces;
-          throw new Error("import did not finish in 30s: " + JSON.stringify({
+          throw new Error(`import did not finish in ${timeoutMs} ms: ` + JSON.stringify({
             changing: ws.isChangingWorkspace, spaces: ws.getWorkspaces().map(s => [s.name, !!s.zenxArcId]),
             active: ws.getActiveWorkspaceFromCache()?.name, tabs: ws.allStoredTabs.length,
             wizardPage: shadow.querySelector("named-deck, deck")?.getAttribute("selected-view"),
@@ -653,11 +679,14 @@ def import_arc(inst, arc_profile="Default"):
           }));
         }
         const ms = Date.now() - t0;
+        await Z.sleep(300);
+        const message = shadow.querySelector('[data-resource-type="BOOKMARKS"] .message-text')?.textContent ?? "";
         await Z.until(() => !win.gZenWorkspaces.isChangingWorkspace, "space switch to settle", 10000);
         win.gBrowser.removeTab(prefsTab);
-        return { ms, listed: items.length };
+        return { ms, listed: items.length, message };
         """,
         arc_profile,
+        timeout_ms,
     )
 
 
@@ -813,6 +842,55 @@ def scenario_import_with_existing_data(env):
     import_arc(inst)
     check_arc_spaces(env, inst.js("return Z.spaces();"), "after importing twice")
     check(inst.js("return Z.essentials();") == 1, "essential not duplicated")
+
+
+def scenario_import_other_arc_profile(env):
+    """
+    Arc's second profile ("Arc Fun") goes into a ZenX profile of the same name,
+    created for it, and nothing of it into the current profile.
+    """
+    a = env.launch()
+    a.js("await Z.ready();")
+    env.install_profile_launcher(a)
+    before = a.js("return Z.spaces();")
+    res = import_arc(a, "Profile 1", timeout_ms=120000)
+    print(f"    import into another profile took {res['ms']} ms: {res['message']!r}")
+    check(
+        any(ch.isdigit() and ch != "0" for ch in res["message"]),
+        f"wizard reports what the other profile imported: {res['message']!r}",
+    )
+    b = env.connect_launched(a)
+    b_spaces = b.js("await Z.ready(); return Z.spaces();")
+    arc_b = [s for s in b_spaces if s["arc"]]
+    check(
+        [(s["name"], s["icon"], s["pinned"]) for s in arc_b]
+        == [("Other profile", "🙈", 2)],
+        f"Arc Fun's space is in the new profile: {[(s['name'], s['pinned']) for s in b_spaces]}",
+    )
+    check(
+        len(b_spaces) == 1,
+        f"the new profile holds only the imported space: {[s['name'] for s in b_spaces]}",
+    )
+    names = b.js(
+        "return Z.zenx().getProfiles().filter(p => p.isCurrent).map(p => p.name);"
+    )
+    check(names == ["Arc Fun"], f"the new profile is named like Arc's: {names}")
+    after = a.js("return Z.spaces();")
+    check(
+        [s["name"] for s in after] == [s["name"] for s in before],
+        f"nothing imported into the current profile: {[s['name'] for s in after]}",
+    )
+
+    # Importing again reuses the profile and doesn't duplicate the space.
+    import_arc(a, "Profile 1", timeout_ms=120000)
+    check(
+        [s["name"] for s in b.js("return Z.spaces();")] == ["Other profile"],
+        "importing again doesn't duplicate the space",
+    )
+    check(
+        a.js("await Z.zenx().init(); return Z.zenx().getProfiles().length;") == 2,
+        "importing again doesn't create another profile",
+    )
 
 
 def scenario_new_profile_and_switching(env):
@@ -1118,6 +1196,7 @@ SCENARIOS = [
     scenario_first_run,
     scenario_import_into_empty,
     scenario_import_with_existing_data,
+    scenario_import_other_arc_profile,
     scenario_new_profile_and_switching,
     scenario_delete_profile,
     scenario_restart_with_two_profiles,

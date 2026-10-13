@@ -99,6 +99,81 @@ add_task(function test_other_profile_spaces() {
   });
 });
 
+add_task(function test_several_containers() {
+  // Newer Arc versions keep Little Arc's space in a container of its own,
+  // before the main one.
+  const sidebar = structuredClone(fixture);
+  const main = sidebar.sidebar.containers.pop();
+  const profile1 = { custom: { _0: { directoryBasename: "Profile 1" } } };
+  sidebar.sidebar.containers.push(
+    { littleBrowser: {} },
+    {
+      spaces: [
+        "little",
+        {
+          id: "little",
+          profile: { default: true },
+          newContainerIDs: [{ unpinned: {} }, "little-unpinned"],
+        },
+        "extra",
+        {
+          id: "extra",
+          title: "Extra",
+          profile: profile1,
+          newContainerIDs: [{ pinned: {} }, "extra-pinned"],
+        },
+      ],
+      items: [
+        "little-unpinned",
+        { id: "little-unpinned", childrenIds: ["t-little"], data: {} },
+        "t-little",
+        {
+          id: "t-little",
+          data: { tab: { savedURL: "https://example.com/little" } },
+        },
+        "extra-pinned",
+        { id: "extra-pinned", childrenIds: ["t-extra"], data: {} },
+        "t-extra",
+        {
+          id: "t-extra",
+          data: { tab: { savedURL: "https://example.com/extra" } },
+        },
+        "top-extra",
+        { id: "top-extra", childrenIds: ["t-top-extra"], data: {} },
+        "t-top-extra",
+        {
+          id: "t-top-extra",
+          data: { tab: { savedURL: "https://example.com/top" } },
+        },
+      ],
+      topAppsContainerIDs: [profile1, "top-extra"],
+    },
+    main
+  );
+
+  const fromDefault = parseArcSidebar(sidebar);
+  const expected = parseArcSidebar(fixture);
+  Assert.deepEqual(
+    fromDefault.spaces.map(space => space.arcId),
+    expected.spaces.map(space => space.arcId),
+    "The main container is read and Little Arc's untitled space is left out"
+  );
+
+  const fromProfile1 = parseArcSidebar(sidebar, {
+    profileDirectory: "Profile 1",
+  });
+  Assert.deepEqual(
+    fromProfile1.spaces.map(space => space.name),
+    ["Extra", "Fun"],
+    "Spaces of every container are read"
+  );
+  Assert.deepEqual(
+    fromProfile1.essentials.map(essential => essential.url),
+    ["https://example.com/top", "https://example.net/chat"],
+    "Favorites of every container are read"
+  );
+});
+
 add_task(function test_not_an_arc_file() {
   Assert.throws(() => parseArcSidebar({}), /Not an Arc sidebar file/);
 });

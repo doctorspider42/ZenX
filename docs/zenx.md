@@ -94,7 +94,8 @@ In the spirit of Zen's own importers, **Arc** appears in the import wizard on ma
 | unpinned ("Today") tab | normal tab |
 | favorite (top app) | essential |
 
-- Only the spaces and favorites of the Arc profile picked in the wizard are imported. To match Arc profiles to ZenX profiles, run the import once in each ZenX profile.
+- Arc profiles map to ZenX profiles. The Arc profile picked in the wizard goes into the ZenX profile with the same name. If there is none, Arc's default profile goes into the current profile, and any other Arc profile (e.g. "Work") gets a new ZenX profile with its name. Everything picked in the wizard (spaces, history, logins…) is imported inside that profile, so one Arc profile's history never lands in another's. The wizard sends the import through a handoff (`import` instead of `space`), the target profile runs the same migrator, and it reports the counts back in `zenx.profile-spaces.import-result.<handoffId>`.
+- Arc keeps several sidebar containers with spaces (newer versions put Little Arc's in one of its own). All of them are read. Little Arc's untitled space with no pinned tabs is left out.
 - Importing again skips spaces that were already imported (`workspace.zenxArcId`) and favorites that are already essentials.
 - Not imported: easels, notes and other Arc-only items, `arc://` pages, Arc's SF Symbol space icons, and Arc's Chromium bookmarks if Arc has none (this is the usual case).
 
@@ -108,7 +109,7 @@ The wizard lists Arc because `prefs/zenx/arc.yaml` sets `browser.migrate.arc.ena
 - Zen's production startup and animations, not the mochitest testing mode.
 - Quits like Cmd+Q, and restarts.
 - Controls several profile processes at once.
-- Uses synthetic Arc data (`ZENX_ARC_DATA_DIR`), generated in the shape of a real sidebar: several spaces, nested folders, a split view, unpinned tabs, favorites, and a second Arc profile.
+- Uses synthetic Arc data (`ZENX_ARC_DATA_DIR`), generated in the shape of a real sidebar: several spaces, nested folders, a split view, unpinned tabs, favorites, a Little Arc container, and a second Arc profile that is imported into a ZenX profile of its own.
 - Fails if anything covers the window after an import (`ui_responsive`).
 
 Scenarios:

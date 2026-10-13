@@ -131,13 +131,17 @@ export function parseArcSidebar(
   { profileDirectory = "Default" } = {}
 ) {
   const containers = sidebarJSON?.sidebar?.containers ?? [];
-  const data = containers.find(container => Array.isArray(container?.spaces));
-  if (!data) {
+  // Arc keeps several containers with spaces (e.g. one for Little Arc and
+  // one for the main window); their item ids don't collide.
+  const dataContainers = containers.filter(container =>
+    Array.isArray(container?.spaces)
+  );
+  if (!dataContainers.length) {
     throw new Error("Not an Arc sidebar file");
   }
 
   const items = new Map();
-  for (const item of objects(data.items)) {
+  for (const item of dataContainers.flatMap(c => objects(c.items))) {
     if (typeof item.id === "string") {
       items.set(item.id, item);
     }
@@ -199,18 +203,20 @@ export function parseArcSidebar(
     id ? childrenOf(id).flatMap(child => convert(child, pinned)) : [];
 
   const spaces = [];
-  for (const space of objects(data.spaces)) {
+  for (const space of dataContainers.flatMap(c => objects(c.spaces))) {
     if (arcProfileDirectory(space.profile) !== profileDirectory) {
       continue;
     }
     const { pinned, unpinned } = spaceContainers(space);
+    const pinnedItems = convertContainer(pinned, true);
+    if (!space.title && !pinnedItems.length) {
+      // Little Arc keeps an untitled space of its own for loose tabs.
+      continue;
+    }
     const result = {
       arcId: space.id,
       name: space.title || "Space",
-      items: [
-        ...convertContainer(pinned, true),
-        ...convertContainer(unpinned, false),
-      ],
+      items: [...pinnedItems, ...convertContainer(unpinned, false)],
     };
     const icon = spaceIcon(space);
     if (icon) {
@@ -224,17 +230,19 @@ export function parseArcSidebar(
   }
 
   const essentials = [];
-  const topApps = data.topAppsContainerIDs ?? [];
-  for (let i = 0; i + 1 < topApps.length; i += 2) {
-    if (arcProfileDirectory(topApps[i]) !== profileDirectory) {
-      continue;
-    }
-    for (const item of childrenOf(topApps[i + 1])) {
-      const tab = item.data?.tab ? convertTab(item, false) : null;
-      if (tab) {
-        essentials.push({ url: tab.url, label: tab.label });
-      } else if (!item.data?.tab) {
-        skipped++;
+  for (const container of dataContainers) {
+    const topApps = container.topAppsContainerIDs ?? [];
+    for (let i = 0; i + 1 < topApps.length; i += 2) {
+      if (arcProfileDirectory(topApps[i]) !== profileDirectory) {
+        continue;
+      }
+      for (const item of childrenOf(topApps[i + 1])) {
+        const tab = item.data?.tab ? convertTab(item, false) : null;
+        if (tab) {
+          essentials.push({ url: tab.url, label: tab.label });
+        } else if (!item.data?.tab) {
+          skipped++;
+        }
       }
     }
   }

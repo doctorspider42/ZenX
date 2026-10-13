@@ -31,7 +31,10 @@ ChromeUtils.defineESModuleGetters(lazy, {
   DeferredTask: "resource://gre/modules/DeferredTask.sys.mjs",
   SelectableProfileService:
     "resource:///modules/profiles/SelectableProfileService.sys.mjs",
+  clearTimeout: "resource://gre/modules/Timer.sys.mjs",
+  MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
   SessionStore: "resource:///modules/sessionstore/SessionStore.sys.mjs",
+  setTimeout: "resource://gre/modules/Timer.sys.mjs",
 });
 
 const PREF_BRANCH = "zenx.profile-spaces.";
@@ -52,6 +55,11 @@ export const OPEN_PROFILE_EDITOR_PREF = `${PREF_BRANCH}open-profile-editor`;
 // Seeded into profiles ZenX creates for a space: drop the empty space Zen
 // makes on first start once the moved space has arrived.
 const FRESH_PROFILE_PREF = `${PREF_BRANCH}fresh-profile`;
+// Shared: what an import run in another profile brought in, read by the
+// profile that asked for it. `<prefix><handoffId>`.
+const IMPORT_RESULT_PREFIX = `${PREF_BRANCH}import-result.`;
+// The other profile may wait for the user, e.g. for keychain access.
+const IMPORT_TIMEOUT_MS = 10 * 60 * 1000;
 
 const FORMAT_VERSION = 1;
 const PUBLISH_DELAY_MS = 500;
@@ -609,24 +617,30 @@ class nsZenXProfileSpaces {
    * its first start, and the profile editor (name, avatar, theme) opens
    * instead of Firefox's new profile page, which Zen's startup hides.
    *
+   * @param {object} [aOptions]
+   * @param {string} [aOptions.name] name the profile instead of letting the
+   *   user pick one in the profile editor
    * @returns {Promise<SelectableProfile>}
    */
-  async createProfile() {
+  async createProfile({ name } = {}) {
     // Also sets up the profile group on the first use.
     const profile = await this.#sps.createNewProfile(false);
+    if (name) {
+      await profile.setNameAsync(name);
+    }
     const prefs = [
       ["zen.welcome-screen.seen", true],
       ["zen.updates.last-version", Services.appinfo.version],
       ["zen.updates.last-build-id", Services.appinfo.appBuildID],
-      [OPEN_PROFILE_EDITOR_PREF, true],
+      [OPEN_PROFILE_EDITOR_PREF, !name],
       [FRESH_PROFILE_PREF, true],
     ];
     await IOUtils.writeUTF8(
       PathUtils.join(profile.path, "prefs.js"),
       prefs
         .map(
-          ([name, value]) =>
-            `user_pref(${JSON.stringify(name)}, ${JSON.stringify(value)});\n`
+          ([pref, value]) =>
+            `user_pref(${JSON.stringify(pref)}, ${JSON.stringify(value)});\n`
         )
         .join(""),
       { mode: "appendOrCreate" }
@@ -634,6 +648,104 @@ class nsZenXProfileSpaces {
     await this.disableStartupProfileSelector();
     await this.#refreshProfiles();
     return profile;
+  }
+
+  // Mark: import
+
+  /**
+   * Where data imported from another browser's profile belongs, like Arc's
+   * "Work" profile: the profile with the same name, else this profile for the
+   * other browser's default profile, else a new profile named like it.
+   *
+   * @param {string} aName name of the other browser's profile
+   * @param {boolean} aIsDefault it is the other browser's default profile
+   * @returns {Promise<?SelectableProfile>} null to import into this profile
+   */
+  async getImportTargetProfile(aName, aIsDefault) {
+    if (!this.available || !aName) {
+      return null;
+    }
+    const sameName = this.#profiles.find(profile => profile.name === aName);
+    if (sameName) {
+      return sameName.id === this.currentProfileId ? null : sameName;
+    }
+    if (aIsDefault) {
+      return null;
+    }
+    return this.createProfile({ name: aName });
+  }
+
+  /**
+   * Runs a migration from the import wizard in another profile (starting it
+   * if needed), so that the data lands in that profile only.
+   *
+   * @param {SelectableProfile} aProfile
+   * @param {{migrator: string, profile: object, items: number}} aImport
+   *   arguments of MigratorBase.migrate()
+   * @returns {Promise<?{results: object, quantities: object}>} what the
+   *   other profile imported, null if it didn't answer in time
+   */
+  async importInProfile(aProfile, aImport) {
+    const handoffId = Services.uuid.generateUUID().toString().slice(1, -1);
+    const resultPref = IMPORT_RESULT_PREFIX + handoffId;
+    const result = new Promise(resolve => {
+      let timer;
+      const observer = () => {
+        const value = readJSONPref(resultPref, null);
+        if (value) {
+          done(value);
+        }
+      };
+      const done = value => {
+        Services.prefs.removeObserver(resultPref, observer);
+        lazy.clearTimeout(timer);
+        resolve(value);
+      };
+      Services.prefs.addObserver(resultPref, observer);
+      timer = lazy.setTimeout(() => done(null), IMPORT_TIMEOUT_MS);
+    });
+
+    const handoffPref = HANDOFF_PREFIX + aProfile.id;
+    const handoffs = readJSONPref(handoffPref, {});
+    handoffs[handoffId] = {
+      v: FORMAT_VERSION,
+      id: handoffId,
+      from: this.currentProfileId,
+      at: Date.now(),
+      import: aImport,
+    };
+    this.#setSharedPref(handoffPref, toSharedJSON(handoffs));
+    this.#sps.launchInstance(aProfile);
+
+    const value = await result;
+    this.#setSharedPref(resultPref, null);
+    return value?.v === FORMAT_VERSION ? value : null;
+  }
+
+  async #runImport(aHandoffId, aImport) {
+    const results = {};
+    try {
+      const migrator = await lazy.MigrationUtils.getMigrator(aImport.migrator);
+      if (!migrator) {
+        throw new Error(`No migrator ${aImport.migrator}`);
+      }
+      await migrator.migrate(
+        aImport.items,
+        false,
+        aImport.profile,
+        (type, success) => (results[type] = success)
+      );
+    } catch (e) {
+      console.error("ZenX: import for another profile failed", e);
+    }
+    this.#setSharedPref(
+      IMPORT_RESULT_PREFIX + aHandoffId,
+      toSharedJSON({
+        v: FORMAT_VERSION,
+        results,
+        quantities: { ...lazy.MigrationUtils._importQuantities },
+      })
+    );
   }
 
   /**
@@ -752,9 +864,25 @@ class nsZenXProfileSpaces {
     await win.gZenWorkspaces.promiseInitialized;
 
     const imported = readJSONPref(IMPORTED_HANDOFFS_PREF, []);
+    const done = [];
     for (const id of ids) {
       const handoff = handoffs[id];
       if (
+        handoff?.v === FORMAT_VERSION &&
+        handoff.import &&
+        !imported.includes(id)
+      ) {
+        // Saved first: an import that takes the browser down must not run
+        // again on every start.
+        imported.push(id);
+        Services.prefs.setStringPref(
+          IMPORTED_HANDOFFS_PREF,
+          JSON.stringify(imported.slice(-MAX_IMPORTED_HANDOFFS))
+        );
+        done.push(id);
+        await this.#runImport(id, handoff.import);
+        continue;
+      } else if (
         handoff?.v === FORMAT_VERSION &&
         handoff.space?.type === "space" &&
         !imported.includes(id) &&
@@ -768,16 +896,21 @@ class nsZenXProfileSpaces {
         }
       }
       imported.push(id);
-      delete handoffs[id];
+      done.push(id);
     }
     Services.prefs.setStringPref(
       IMPORTED_HANDOFFS_PREF,
       JSON.stringify(imported.slice(-MAX_IMPORTED_HANDOFFS))
     );
     await this.#removeStarterSpaces(win);
+    // Read again, other handoffs may have arrived during a long import.
+    const remaining = readJSONPref(handoffPref, {});
+    for (const id of done) {
+      delete remaining[id];
+    }
     this.#setSharedPref(
       handoffPref,
-      Object.keys(handoffs).length ? toSharedJSON(handoffs) : null
+      Object.keys(remaining).length ? toSharedJSON(remaining) : null
     );
     // Publish right away, this is what lets the source drop its copy.
     this.#publishTask.disarm();
@@ -797,7 +930,8 @@ class nsZenXProfileSpaces {
     }
     const { gZenWorkspaces } = aWindow;
     const spaces = gZenWorkspaces.getWorkspaces();
-    if (!spaces.some(space => space.zenxMovedFrom)) {
+    const arrived = space => space.zenxMovedFrom || space.zenxArcId;
+    if (!spaces.some(arrived)) {
       return;
     }
     Services.prefs.clearUserPref(FRESH_PROFILE_PREF);
@@ -808,7 +942,7 @@ class nsZenXProfileSpaces {
           !tab.hasAttribute("zen-empty-tab") &&
           !tab.linkedBrowser?.currentURI?.spec.startsWith("about:editprofile")
       );
-      if (!space.zenxMovedFrom && !hasTabs) {
+      if (!arrived(space) && !hasTabs) {
         await gZenWorkspaces.removeWorkspace(space.uuid);
       }
     }
