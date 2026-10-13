@@ -77,16 +77,18 @@ npm ci --no-audit --no-fund --loglevel=error
 # The Firefox version the source tree was downloaded for (Zen rewrites
 # browser/config/version.txt, so that file can't tell).
 STAMP=.surfer/zenx-engine-firefox-version
-if [ -d engine ] && [ "$(cat "$STAMP" 2>/dev/null)" != "$FF_VERSION" ]; then
+if [ -d engine ] && { [ ! -d engine/.git ] || [ "$(cat "$STAMP" 2>/dev/null)" != "$FF_VERSION" ]; }; then
   step "No complete Firefox $FF_VERSION source tree, starting from a fresh one"
   rm -rf engine
 fi
-if [ ! -d engine ]; then
+if [ ! -d engine/.git ]; then
+  rm -f "$STAMP"
   step "Firefox $FF_VERSION source"
   mkdir -p .surfer/engine
   CACHED="$REPO/.surfer/engine/firefox-$FF_VERSION.source.tar.xz"
   [ -f "$CACHED" ] && cp "$CACHED" .surfer/engine/
   npm run download
+  [ -d engine/.git ] || die "Downloading Firefox $FF_VERSION failed"
   echo "$FF_VERSION" >"$STAMP"
 fi
 
