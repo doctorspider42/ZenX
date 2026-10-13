@@ -649,7 +649,8 @@ def import_arc(inst, arc_profile="Default", timeout_ms=30000):
         const shadow = wizard.openOrClosedShadowRoot;
         const items = [...shadow.querySelectorAll('panel-item[key="arc"]')];
         if (!items.length) throw new Error("Arc is not listed in the import wizard");
-        const item = items.find(i => i.getAttribute("profile") === arcProfile || i.profile?.id === arcProfile || i.textContent.includes(arcProfile === "Default" ? "Arc Home" : "Arc Fun")) ?? items[0];
+        const item = items.find(i => i.profile?.id === arcProfile);
+        if (!item) throw new Error(`Arc profile ${arcProfile} not listed: ${items.map(i => i.profile?.id)}`);
         item.click();
         const selector = shadow.querySelector("#browser-profile-selector");
         await Z.until(() => selector.selectedPanelItem === item, "Arc selected in the import wizard", 10000);
@@ -684,7 +685,7 @@ def import_arc(inst, arc_profile="Default", timeout_ms=30000):
         const message = shadow.querySelector('[data-resource-type="BOOKMARKS"] .message-text')?.textContent ?? "";
         await Z.until(() => !win.gZenWorkspaces.isChangingWorkspace, "space switch to settle", 10000);
         win.gBrowser.removeTab(prefsTab);
-        return { ms, listed: items.length, message };
+        return { ms, listed: items.length, message, first: items[0].profile?.id ?? null, firstName: items[0].profile?.name ?? null };
         """,
         arc_profile,
         timeout_ms,
@@ -904,6 +905,36 @@ def scenario_import_other_arc_profile(env):
     check(
         a.js("await Z.zenx().init(); return Z.zenx().getProfiles().length;") == 2,
         "importing again doesn't create another profile",
+    )
+
+
+def scenario_import_all_arc_profiles(env):
+    """
+    The wizard's "all Arc profiles" entry imports Arc's default profile into
+    the current profile and the other one into a ZenX profile of its own.
+    """
+    a = env.launch()
+    a.js("await Z.ready();")
+    env.install_profile_launcher(a)
+    res = import_arc(a, "zenx-all", timeout_ms=120000)
+    print(f"    import of all Arc profiles took {res['ms']} ms: {res['message']!r}")
+    check(
+        (res["first"], res["firstName"]) == ("zenx-all", "Arc Home + Arc Fun"),
+        f"all Arc profiles are offered first: {res['first']!r} {res['firstName']!r}",
+    )
+    check_arc_spaces(env, a.js("return Z.spaces();"), "all profiles, current")
+    check(a.js("return Z.essentials();") == 1, "all profiles: favorite became an essential")
+    b = env.connect_launched(a)
+    b_spaces = b.js("await Z.ready(); return Z.spaces();")
+    check(
+        [(s["name"], bool(s["arc"]), s["pinned"]) for s in b_spaces]
+        == [("Other profile", True, 2)],
+        f"all profiles: Arc Fun's space in its own profile: {b_spaces}",
+    )
+    total = sum(s["pinned"] + s["normal"] for s in env.expected_arc.values()) + 1 + 2
+    check(
+        str(total) in res["message"],
+        f"all profiles: wizard counts both profiles ({total}): {res['message']!r}",
     )
 
 
@@ -1211,6 +1242,7 @@ SCENARIOS = [
     scenario_import_into_empty,
     scenario_import_with_existing_data,
     scenario_import_other_arc_profile,
+    scenario_import_all_arc_profiles,
     scenario_new_profile_and_switching,
     scenario_delete_profile,
     scenario_restart_with_two_profiles,

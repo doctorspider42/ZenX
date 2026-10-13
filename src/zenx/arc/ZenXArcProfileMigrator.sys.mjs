@@ -15,7 +15,8 @@
  * profile with the same name, a new one if there is none (Arc's default
  * profile goes to the current profile). Everything picked in the wizard is
  * then imported by that profile, so e.g. Arc's "Work" history doesn't end up
- * in the personal profile.
+ * in the personal profile. With several Arc profiles the wizard also offers
+ * all of them at once.
  */
 
 import { ChromeProfileMigrator } from "resource:///modules/ChromeProfileMigrator.sys.mjs";
@@ -33,6 +34,8 @@ ChromeUtils.defineESModuleGetters(lazy, {
 });
 
 const DEFAULT_ARC_PROFILE = "Default";
+// Source profile id of the "all Arc profiles" entry in the wizard.
+const ALL_ARC_PROFILES = "zenx-all";
 
 export class ArcProfileMigrator extends ChromeProfileMigrator {
   static get key() {
@@ -62,7 +65,55 @@ export class ArcProfileMigrator extends ChromeProfileMigrator {
     return super._getChromeUserDataPathIfExists(noRemapping);
   }
 
+  #allProfilesEntry = null;
+
+  async getSourceProfiles() {
+    const profiles = await super.getSourceProfiles();
+    if (!profiles || profiles.length < 2 || this.#allProfilesEntry) {
+      return profiles;
+    }
+    this.#allProfilesEntry = {
+      id: ALL_ARC_PROFILES,
+      name: profiles.map(profile => profile.name).join(" + "),
+    };
+    // Cached by the base class, so the entry is added only once.
+    profiles.unshift(this.#allProfilesEntry);
+    return profiles;
+  }
+
+  async #arcProfiles() {
+    const profiles = await this.getSourceProfiles();
+    return (profiles ?? []).filter(profile => profile.id !== ALL_ARC_PROFILES);
+  }
+
+  async #migrateAll(aItems, aStartup, aProgressCallback) {
+    const results = new Map();
+    const totals = {};
+    for (const profile of await this.#arcProfiles()) {
+      try {
+        await this.migrate(aItems, aStartup, profile, (type, success) =>
+          results.set(type, results.get(type) || success)
+        );
+      } catch (e) {
+        // e.g. nothing picked in the wizard exists in this profile.
+        console.error(`ZenX: Arc profile ${profile.id} not imported`, e);
+      }
+      for (const [key, count] of Object.entries(
+        MigrationUtils._importQuantities
+      )) {
+        totals[key] = (totals[key] ?? 0) + count;
+      }
+    }
+    Object.assign(MigrationUtils._importQuantities, totals);
+    for (const [type, success] of results) {
+      aProgressCallback(Number(type), success);
+    }
+  }
+
   async migrate(aItems, aStartup, aProfile, aProgressCallback = () => {}) {
+    if (aProfile?.id === ALL_ARC_PROFILES) {
+      return this.#migrateAll(aItems, aStartup, aProgressCallback);
+    }
     const target =
       aProfile && !aProfile.zenxImportHere && !aStartup
         ? await lazy.ZenXProfileSpaces.getImportTargetProfile(
@@ -96,6 +147,16 @@ export class ArcProfileMigrator extends ChromeProfileMigrator {
   }
 
   async getResources(aProfile) {
+    if (aProfile?.id === ALL_ARC_PROFILES) {
+      // What the wizard offers; migrate() imports profile by profile.
+      const types = new Set();
+      for (const profile of await this.#arcProfiles()) {
+        for (const resource of await this.getResources(profile)) {
+          types.add(resource.type);
+        }
+      }
+      return [...types].map(type => ({ type, migrate: done => done(false) }));
+    }
     const resources = await super.getResources(aProfile);
     const sidebar = await readArcSidebar(
       aProfile?.id ?? DEFAULT_ARC_PROFILE
