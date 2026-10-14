@@ -22,6 +22,7 @@
 import { ChromeProfileMigrator } from "resource:///modules/ChromeProfileMigrator.sys.mjs";
 import { MigrationUtils } from "resource:///modules/MigrationUtils.sys.mjs";
 import {
+  addArcFaviconsFromProfile,
   getArcImportWindow,
   getArcUserDataPath,
   importArcIntoWindow,
@@ -161,7 +162,12 @@ export class ArcProfileMigrator extends ChromeProfileMigrator {
       }
       return [...types].map(type => ({ type, migrate: done => done(false) }));
     }
-    const resources = await super.getResources(aProfile);
+    const resources = (await super.getResources(aProfile)).filter(
+      resource =>
+        // Zen turns form history off, importing into it can only fail.
+        resource.type != MigrationUtils.resourceTypes.FORMDATA ||
+        Services.prefs.getBoolPref("browser.formfill.enable", true)
+    );
     const sidebar = await readArcSidebar(
       aProfile?.id ?? DEFAULT_ARC_PROFILE
     ).catch(e => {
@@ -175,7 +181,15 @@ export class ArcProfileMigrator extends ChromeProfileMigrator {
         type: MigrationUtils.resourceTypes.BOOKMARKS,
         async migrate(aCallback) {
           try {
+            await addArcFaviconsFromProfile(
+              sidebar,
+              aProfile?.id ?? DEFAULT_ARC_PROFILE
+            ).catch(e => console.error("ZenX: no icons from Arc", e));
             const win = getArcImportWindow();
+            // Zen's welcome screen only runs on the first start. Only then do
+            // Zen's starter spaces go; a later import never removes spaces.
+            const firstRun =
+              win.document.documentElement.hasAttribute("zen-welcome-stage");
             if (isWindowBusy(win)) {
               // From Zen's welcome screen: the spaces are created once it is
               // done, the wizard reports what will come.
@@ -184,7 +198,7 @@ export class ArcProfileMigrator extends ChromeProfileMigrator {
               MigrationUtils._importQuantities.bookmarks +=
                 pinnedTabs + tabs + essentials;
               whenWindowFree(win)
-                .then(() => importArcIntoWindow(sidebar, win))
+                .then(() => importArcIntoWindow(sidebar, win, { firstRun }))
                 .catch(e => console.error("ZenX: Arc spaces import failed", e));
               aCallback(true);
               return;

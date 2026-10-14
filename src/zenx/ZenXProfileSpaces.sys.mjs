@@ -59,6 +59,9 @@ export const OPEN_PROFILE_EDITOR_PREF = `${PREF_BRANCH}open-profile-editor`;
 const FRESH_PROFILE_PREF = `${PREF_BRANCH}fresh-profile`;
 // Local: the window of another profile the first window takes the place of.
 const PENDING_WINDOW_PLACE_PREF = `${PREF_BRANCH}pending-window-place`;
+const PRELOAD_PREF = `${PREF_BRANCH}preload`;
+// After startup, so the profile in front gets going first.
+const PRELOAD_DELAY_MS = 5000;
 // Shared: what an import run in another profile brought in, read by the
 // profile that asked for it. `<prefix><handoffId>`.
 const IMPORT_RESULT_PREFIX = `${PREF_BRANCH}import-result.`;
@@ -68,6 +71,8 @@ const IMPORT_TIMEOUT_MS = 10 * 60 * 1000;
 const FORMAT_VERSION = 1;
 // Fade-in of a profile's window over the one it replaces.
 const WINDOW_FADE_MS = 160;
+// How long a window that slid its space out waits to be covered.
+const SLIDE_OUT_WAIT_MS = 1500;
 const PUBLISH_DELAY_MS = 500;
 const MAX_IMPORTED_HANDOFFS = 50;
 // Tabs whose URL cannot be reopened in another profile.
@@ -88,6 +93,15 @@ export function toSharedJSON(value) {
     /[\u007f-\uffff]/g,
     c => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0")
   );
+}
+
+/**
+ * A URL without its query and fragment, to compare pages.
+ *
+ * @param {string} aUrl
+ */
+function withoutQuery(aUrl) {
+  return String(aUrl).replace(/[?#].*$/, "");
 }
 
 function readJSONPref(name, fallback) {
@@ -148,7 +162,7 @@ class nsZenXProfileSpaces {
     Services.prefs.addObserver(PREF_BRANCH, this);
     Services.obs.addObserver(this, "sps-profiles-updated");
     Services.obs.addObserver(this, "quit-application-granted");
-    Services.ww.registerNotification(this);
+    Services.obs.addObserver(this, "quit-application");
     this.#publishTask = new lazy.DeferredTask(
       () => this.#publishRegistry(),
       PUBLISH_DELAY_MS
@@ -164,8 +178,169 @@ class nsZenXProfileSpaces {
     await this.#refreshProfiles();
     if (this.active) {
       await this.disableStartupProfileSelector();
+      if (this.#preloadedBy !== null) {
+        // Firefox makes every profile the default one when it starts; the
+        // next start must still open the profile in front.
+        const front = this.#getProfile(this.#preloadedBy);
+        if (front) {
+          await this.#sps.setDefaultProfileForGroup(front);
+        }
+      } else {
+        this.#schedulePreload();
+      }
     }
     this.#notifyListeners();
+  }
+
+  // Mark: preloading
+
+  /** Profile that started this one in the background (`--zenx-preload`). */
+  #preloadedBy = null;
+
+  /** This profile's first window stays hidden, see startInBackground(). */
+  #startHidden = false;
+
+  /**
+   * This profile was started in the background by the profile in front
+   * (`--zenx-preload <id>`), to be ready when one of its spaces is picked.
+   * It runs without a window on screen or a Dock icon until then.
+   *
+   * @param {number} aFromProfileId
+   */
+  startInBackground(aFromProfileId) {
+    this.#preloadedBy = aFromProfileId;
+    this.#startHidden = true;
+  }
+
+  /**
+   * Called by every browser window as it loads, before it is shown.
+   *
+   * @param {Window} aWindow
+   */
+  prepareWindow(aWindow) {
+    if (!this.#startHidden) {
+      return;
+    }
+    this.#startHidden = false;
+    // Firefox shows the window again on its own while it starts up (from
+    // native code, after it is loaded), so it is kept hidden until a switch
+    // shows it, and transparent meanwhile so it never flashes. No Dock icon
+    // either (MOZ_APP_NO_DOCK).
+    this.#keptHidden.add(aWindow);
+    if (!this.#keepingHidden) {
+      this.#keepingHidden = true;
+      Services.obs.addObserver(this, "xul-window-visible");
+    }
+    this.#setWindowOpacity(aWindow, 0);
+    this.#setWindowVisible(aWindow, false);
+    // Firefox finishes starting a window (session, extensions…) once it has
+    // painted, which a hidden window never does.
+    aWindow.addEventListener(
+      "load",
+      () =>
+        aWindow.setTimeout(() => aWindow.gBrowserInit._boundDelayedStartup?.()),
+      { once: true }
+    );
+  }
+
+  /** Windows that stay hidden whatever Firefox does, see prepareWindow(). */
+  #keptHidden = new WeakSet();
+  #keepingHidden = false;
+  /** Set while this module itself shows or hides a window. */
+  #changingVisibility = false;
+
+  #onWindowVisible(aAppWindow) {
+    if (this.#changingVisibility) {
+      return;
+    }
+    let win;
+    try {
+      win = aAppWindow.QueryInterface(Ci.nsIAppWindow).docShell?.domWindow;
+    } catch (e) {
+      return;
+    }
+    if (win && this.#keptHidden.has(win) && !win.closed) {
+      // Not from inside Firefox's own SetVisibility, which ignores nested
+      // calls.
+      Services.tm.dispatchToMainThread(() => {
+        if (this.#keptHidden.has(win) && !win.closed) {
+          this.#setWindowVisible(win, false);
+        }
+      });
+    }
+  }
+
+  #schedulePreload() {
+    lazy.setTimeout(
+      () =>
+        Services.tm.idleDispatchToMainThread(() =>
+          this.#preloadProfiles().catch(console.error)
+        ),
+      PRELOAD_DELAY_MS
+    );
+  }
+
+  /** Starts the other profiles of the group that aren't running. */
+  async #preloadProfiles() {
+    if (
+      Services.startup.shuttingDown ||
+      !Services.prefs.getBoolPref(PRELOAD_PREF, true)
+    ) {
+      return;
+    }
+    await this.#refreshProfiles();
+    for (const profile of this.#profiles) {
+      if (profile.id === this.currentProfileId || this.#isRunning(profile)) {
+        continue;
+      }
+      try {
+        this.#startInBackground([
+          "--profile",
+          profile.path,
+          "--zenx-preload",
+          `${this.currentProfileId}`,
+        ]);
+      } catch (e) {
+        console.error(`ZenX: could not preload profile ${profile.id}`, e);
+      }
+    }
+  }
+
+  /**
+   * Starts a process without a Dock icon (MOZ_APP_NO_DOCK) that doesn't
+   * take the focus. Firefox's own execProcess goes through LaunchServices on
+   * macOS, which activates the new process and doesn't pass the environment.
+   *
+   * @param {Array<string>} aArgs
+   */
+  #startInBackground(aArgs) {
+    const noDock = Services.env.get("MOZ_APP_NO_DOCK");
+    Services.env.set("MOZ_APP_NO_DOCK", "1");
+    try {
+      if (Object.hasOwn(this.#sps, "execProcess")) {
+        // Replaced for a separate profile root (#useAppIniForLaunches) or by
+        // tests; both start the process with nsIProcess too.
+        this.#sps.execProcess(aArgs);
+        return;
+      }
+      const process = Cc["@mozilla.org/process/util;1"].createInstance(
+        Ci.nsIProcess
+      );
+      process.init(Services.dirsvc.get("XREExeF", Ci.nsIFile));
+      process.runw(false, aArgs, aArgs.length);
+    } finally {
+      Services.env.set("MOZ_APP_NO_DOCK", noDock);
+    }
+  }
+
+  #isRunning(aProfile) {
+    try {
+      // Handled by ZenXCommandLine without doing anything.
+      this.#sps.sendCommandLine(aProfile.path, ["--zenx-ping"], false);
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   /**
@@ -233,17 +408,18 @@ class nsZenXProfileSpaces {
           this.processIncomingHandoffs();
         });
         break;
+      case "xul-window-visible":
+        this.#onWindowVisible(aSubject);
+        break;
       case "quit-application-granted":
         this.#publishTask?.finalize();
-        this.#revealHiddenPeer();
         break;
-      case "domwindowclosed":
-        if (
-          aSubject.document?.documentElement?.getAttribute("windowtype") ===
-            "navigator:browser" &&
-          !this.#visibleBrowserWindows().some(win => win !== aSubject)
-        ) {
+      case "quit-application":
+        // Sent once the quit can no longer be cancelled.
+        if (aData === "restart") {
           this.#revealHiddenPeer();
+        } else if (!this.#quitByPeer) {
+          this.#quitBackgroundProfiles();
         }
         break;
     }
@@ -569,8 +745,18 @@ class nsZenXProfileSpaces {
   }
 
   #setWindowVisible(aWindow, aVisible) {
-    aWindow.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow).visibility =
-      aVisible;
+    if (aVisible) {
+      // A switch shows it: no longer kept hidden (takeWindowPlace makes it
+      // opaque again).
+      this.#keptHidden.delete(aWindow);
+    }
+    this.#changingVisibility = true;
+    try {
+      aWindow.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow).visibility =
+        aVisible;
+    } finally {
+      this.#changingVisibility = false;
+    }
     aWindow.document.documentElement.toggleAttribute("zenx-hidden", !aVisible);
   }
 
@@ -588,8 +774,18 @@ class nsZenXProfileSpaces {
    * @param {Window} aWindow
    * @param {?string} aFrame see windowFrame()
    * @param {?number} aFromProfileId profile whose window to hide
+   * @param {object} [aOptions]
+   * @param {?string} [aOptions.spaceUuid] space to show, switched to without
+   *   Zen's animation: it slides in instead
+   * @param {number} [aOptions.slide] 1 to slide the space in from the right,
+   *   -1 from the left, 0 not to
    */
-  async takeWindowPlace(aWindow, aFrame, aFromProfileId) {
+  async takeWindowPlace(
+    aWindow,
+    aFrame,
+    aFromProfileId,
+    { spaceUuid = null, slide = 0 } = {}
+  ) {
     const fade = !!aFrame && !!this.#dock;
     if (fade) {
       this.#setWindowOpacity(aWindow, 0);
@@ -598,6 +794,19 @@ class nsZenXProfileSpaces {
     for (const win of lazy.BrowserWindowTracker.orderedWindows) {
       if (win.document.documentElement.hasAttribute("zenx-hidden")) {
         this.#setWindowVisible(win, true);
+        if (win !== aWindow || !fade) {
+          // A preloaded window was kept transparent.
+          this.#setWindowOpacity(win, 1);
+        }
+      }
+    }
+    // Shown first too: a window that has never been shown doesn't run
+    // animation frames, which the switch waits for.
+    if (spaceUuid) {
+      try {
+        await this.#changeSpaceWithoutAnimation(aWindow, spaceUuid);
+      } catch (e) {
+        console.error(e);
       }
     }
     const [x, y, width, height] = String(aFrame ?? "")
@@ -615,6 +824,7 @@ class nsZenXProfileSpaces {
       aWindow.moveTo(x, y);
     }
     aWindow.focus();
+    const slideIn = slide ? this.#slideSpace(aWindow, slide, 0) : null;
     if (fade) {
       try {
         await this.#fadeIn(aWindow);
@@ -623,6 +833,7 @@ class nsZenXProfileSpaces {
       }
       this.#setWindowOpacity(aWindow, 1);
     }
+    await slideIn;
 
     const from = this.#getProfile(aFromProfileId);
     if (!aFrame || !from || from.id === this.currentProfileId) {
@@ -637,10 +848,85 @@ class nsZenXProfileSpaces {
     }
   }
 
+  async #changeSpaceWithoutAnimation(aWindow, aSpaceUuid) {
+    const spaces = aWindow.gZenWorkspaces;
+    await spaces.promiseInitialized;
+    const space = spaces.resolveWorkspaceFromCLIString(aSpaceUuid);
+    if (!space || space.uuid === spaces.activeWorkspace) {
+      return;
+    }
+    // Zen doesn't animate a switch while one is animating; it clears this
+    // when the switch is done.
+    spaces._animatingChange = true;
+    await spaces.changeWorkspace(space);
+  }
+
+  /**
+   * Zen's space switch animation across two windows: the window switching
+   * away slides its space out (aDirection 1: to the left), the one taking its
+   * place slides its space in (from the right).
+   *
+   * @param {Window} aWindow
+   * @param {number} aDirection 1 or -1, see ZenXProfileSpacesUI
+   * @param {number} aTo 0 to slide in, otherwise where to slide out to
+   *   (-aDirection)
+   */
+  async #slideSpace(aWindow, aDirection, aTo) {
+    const spaces = aWindow.gZenWorkspaces;
+    const element = spaces?.workspaceElement(spaces.activeWorkspace);
+    if (!element || aWindow.gReduceMotion) {
+      return;
+    }
+    const from = aTo ? 0 : aDirection * 100;
+    try {
+      await aWindow.gZenUIManager.motion.animate(
+        element,
+        { transform: [`translateX(${from}%)`, `translateX(${aTo * 100}%)`] },
+        {
+          type: "spring",
+          bounce: 0,
+          duration:
+            Services.prefs.getIntPref(
+              "zen.workspaces.switch-animation-duration",
+              250
+            ) / 1000,
+        }
+      );
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  /** Resolves when hideWindows() runs. */
+  #whenHidden = null;
+
+  async #slideOut(aWindow, aDirection) {
+    const hidden = Promise.withResolvers();
+    this.#whenHidden = hidden;
+    await this.#slideSpace(aWindow, aDirection, -aDirection);
+    // Out of sight until the other window covers this one, back in place
+    // once it's hidden (or if that never happens).
+    await Promise.race([
+      hidden.promise,
+      new Promise(resolve => lazy.setTimeout(resolve, SLIDE_OUT_WAIT_MS)),
+    ]);
+    if (this.#whenHidden === hidden) {
+      this.#whenHidden = null;
+    }
+    const spaces = aWindow.gZenWorkspaces;
+    if (!aWindow.closed && spaces) {
+      spaces._organizeWorkspaceStripLocations(
+        spaces.getActiveWorkspaceFromCache(),
+        true
+      );
+    }
+  }
+
   /** Another profile's window took this profile's place: hide our windows. */
   hideWindows() {
     // Whoever we had hidden is shown again by the profile now in front.
     this.#hiddenPeerId = null;
+    this.#whenHidden?.resolve();
     for (const win of lazy.BrowserWindowTracker.orderedWindows) {
       if (!win.closed) {
         this.#setWindowVisible(win, false);
@@ -655,8 +941,9 @@ class nsZenXProfileSpaces {
   }
 
   /**
-   * This profile is going away (quit, or its last window closed): bring back
-   * the window it hid, in its place.
+   * This profile restarts: bring back the window it hid, in its place. (On a
+   * quit, that profile quits too. When the last window is closed it stays
+   * hidden, as the app stays open without windows on macOS.)
    */
   #revealHiddenPeer() {
     const peer = this.#getProfile(this.#hiddenPeerId);
@@ -677,6 +964,44 @@ class nsZenXProfileSpaces {
     }
   }
 
+  /** This profile quits because the one in front did (`--zenx-quit`). */
+  #quitByPeer = false;
+
+  /**
+   * Like Arc, ZenX is one app: quitting it quits the profiles in the
+   * background too, the ones whose windows this or an earlier switch hid. A
+   * profile that still shows a window (e.g. a full screen one) keeps running.
+   */
+  #quitBackgroundProfiles() {
+    for (const profile of this.#profiles) {
+      if (profile.id === this.currentProfileId) {
+        continue;
+      }
+      try {
+        this.#sps.sendCommandLine(profile.path, ["--zenx-quit"], false);
+      } catch (e) {
+        // Expected when no instance is running with that profile.
+      }
+    }
+  }
+
+  /**
+   * The profile in front quits (`--zenx-quit`): quit too, unless a window of
+   * this profile is on screen.
+   */
+  quitIfInBackground() {
+    if (this.#visibleBrowserWindows().length) {
+      return;
+    }
+    this.#quitByPeer = true;
+    // Forced: a hidden window can't show a "Quit and close tabs?" prompt.
+    // The session is still saved, as on any quit.
+    // Not from inside the command line handler of the remote call.
+    Services.tm.dispatchToMainThread(() =>
+      Services.startup.quit(Ci.nsIAppStartup.eForceQuit)
+    );
+  }
+
   /**
    * Brings up the given space of another profile, starting that profile's
    * process if needed.
@@ -685,8 +1010,15 @@ class nsZenXProfileSpaces {
    * @param {string} aSpaceUuid
    * @param {?Window} [aWindow] the window the switch is made from; the other
    *   profile's window takes its place and hides it
+   * @param {number} [aSlideDirection] 1 or -1 to slide like Zen's own space
+   *   switch (see ZenXProfileSpacesUI), 0 not to
    */
-  async openRemoteSpace(aProfileId, aSpaceUuid, aWindow = null) {
+  async openRemoteSpace(
+    aProfileId,
+    aSpaceUuid,
+    aWindow = null,
+    aSlideDirection = 0
+  ) {
     const profile = this.#getProfile(aProfileId);
     if (!profile) {
       return;
@@ -704,8 +1036,17 @@ class nsZenXProfileSpaces {
         `${this.currentProfileId}`
       );
     }
+    const slide = frame && aSlideDirection ? aSlideDirection : 0;
     try {
-      this.#sps.sendCommandLine(profile.path, args, true);
+      this.#sps.sendCommandLine(
+        profile.path,
+        // Not "-1": a value starting with "-" would be taken for a flag.
+        slide ? [...args, "--zenx-slide", slide > 0 ? "right" : "left"] : args,
+        true
+      );
+      if (slide) {
+        this.#slideOut(aWindow, slide).catch(console.error);
+      }
       return;
     } catch (e) {
       // Expected when no instance is running with that profile.
@@ -912,6 +1253,9 @@ class nsZenXProfileSpaces {
       ["zen.updates.last-build-id", Services.appinfo.appBuildID],
       [OPEN_PROFILE_EDITOR_PREF, !name],
       [FRESH_PROFILE_PREF, true],
+      // No first-run pages (Zen's welcome and privacy policy): they would
+      // keep Zen's starter space from being removed.
+      ["browser.startup.homepage_override.mstone", "ignore"],
     ];
     await IOUtils.writeUTF8(
       PathUtils.join(profile.path, "prefs.js"),
@@ -996,7 +1340,17 @@ class nsZenXProfileSpaces {
       import: aImport,
     };
     this.#setSharedPref(handoffPref, toSharedJSON(handoffs));
-    this.#sps.launchInstance(aProfile);
+    // The import runs in the background: a running profile picks the handoff
+    // up from the shared pref, one that isn't running starts like a preloaded
+    // one, hidden. Firefox's launchInstance would bring its window up.
+    if (!this.#isRunning(aProfile)) {
+      this.#startInBackground([
+        "--profile",
+        aProfile.path,
+        "--zenx-preload",
+        `${this.currentProfileId}`,
+      ]);
+    }
 
     const value = await result;
     this.#setSharedPref(resultPref, null);
@@ -1146,6 +1500,7 @@ class nsZenXProfileSpaces {
 
     const imported = readJSONPref(IMPORTED_HANDOFFS_PREF, []);
     const done = [];
+    let spaceArrived = false;
     for (const id of ids) {
       const handoff = handoffs[id];
       if (
@@ -1171,6 +1526,7 @@ class nsZenXProfileSpaces {
       ) {
         try {
           await this.#importSpace(win, handoff.space, handoff.order);
+          spaceArrived = true;
         } catch (e) {
           console.error("ZenX: could not import space from another profile", e);
           continue;
@@ -1196,7 +1552,14 @@ class nsZenXProfileSpaces {
     // Publish right away, this is what lets the source drop its copy.
     this.#publishTask.disarm();
     this.#publishRegistry();
-    win.focus();
+    // A moved space is shown where it arrived. An import stays in the
+    // background, the profile in front shows the wizard's result.
+    if (
+      spaceArrived &&
+      !win.document.documentElement.hasAttribute("zenx-hidden")
+    ) {
+      win.focus();
+    }
   }
 
   /**
@@ -1209,24 +1572,61 @@ class nsZenXProfileSpaces {
     if (!Services.prefs.getBoolPref(FRESH_PROFILE_PREF, false)) {
       return;
     }
+    if (await this.removeStarterSpaces(aWindow)) {
+      Services.prefs.clearUserPref(FRESH_PROFILE_PREF);
+    }
+  }
+
+  /**
+   * Removes the spaces Zen creates on a profile's first start once spaces
+   * have arrived (moved from another profile or imported from Arc): spaces
+   * that hold nothing but empty tabs and first-run pages. A space with any
+   * other tab is kept.
+   *
+   * @param {Window} aWindow
+   * @returns {Promise<boolean>} false if no space has arrived yet
+   */
+  async removeStarterSpaces(aWindow) {
     const { gZenWorkspaces } = aWindow;
     const spaces = gZenWorkspaces.getWorkspaces();
     const arrived = space => space.zenxMovedFrom || space.zenxArcId;
     if (!spaces.some(arrived)) {
-      return;
+      return false;
     }
-    Services.prefs.clearUserPref(FRESH_PROFILE_PREF);
+    const firstRunPages = new Set(
+      [
+        "startup.homepage_welcome_url",
+        "startup.homepage_welcome_url.additional",
+      ]
+        .flatMap(pref => {
+          try {
+            return Services.urlFormatter.formatURLPref(pref).split("|");
+          } catch (e) {
+            return [];
+          }
+        })
+        .map(url => withoutQuery(url))
+        .filter(url => url && url !== "about:blank")
+    );
+    const isStarterTab = tab => {
+      if (tab.hasAttribute("zen-empty-tab")) {
+        return true;
+      }
+      const url = tab.linkedBrowser?.currentURI?.spec ?? "";
+      return url.startsWith("about:") || firstRunPages.has(withoutQuery(url));
+    };
     for (const space of spaces) {
-      const hasTabs = gZenWorkspaces.allStoredTabs.some(
-        tab =>
-          tab.getAttribute("zen-workspace-id") === space.uuid &&
-          !tab.hasAttribute("zen-empty-tab") &&
-          !tab.linkedBrowser?.currentURI?.spec.startsWith("about:editprofile")
+      if (arrived(space)) {
+        continue;
+      }
+      const tabs = gZenWorkspaces.allStoredTabs.filter(
+        tab => tab.getAttribute("zen-workspace-id") === space.uuid
       );
-      if (!arrived(space) && !hasTabs) {
+      if (tabs.every(isStarterTab)) {
         await gZenWorkspaces.removeWorkspace(space.uuid);
       }
     }
+    return true;
   }
 
   #hasSpaceMovedFrom(aWindow, aSourceUuid) {

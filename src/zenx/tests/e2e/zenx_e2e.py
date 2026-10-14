@@ -29,11 +29,14 @@ import os
 import plistlib
 import shutil
 import socket
+import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
 import time
 import traceback
+import zlib
 from pathlib import Path
 
 from marionette_driver.marionette import Marionette
@@ -443,6 +446,69 @@ class Instance:
             self.process.kill()
 
 
+def tiny_png(rgb):
+    """A 16x16 PNG in one color."""
+    row = b"\x00" + bytes(rgb) * 16
+
+    def chunk(kind, data):
+        return (
+            struct.pack(">I", len(data))
+            + kind
+            + data
+            + struct.pack(">I", zlib.crc32(kind + data))
+        )
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 16, 16, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(row * 16))
+        + chunk(b"IEND", b"")
+    )
+
+
+def write_arc_favicons(path):
+    """
+    Arc's (Chromium's) Favicons database with an icon for a page of the
+    synthetic tabs' site, but none of the tabs' own pages: imported tabs get
+    it by site.
+    """
+    db = sqlite3.connect(path)
+    db.executescript(
+        """
+        CREATE TABLE favicons (id INTEGER PRIMARY KEY, url LONGVARCHAR NOT NULL, icon_type INTEGER DEFAULT 1);
+        CREATE TABLE favicon_bitmaps (id INTEGER PRIMARY KEY, icon_id INTEGER NOT NULL, last_updated INTEGER DEFAULT 0,
+          image_data BLOB, width INTEGER DEFAULT 0, height INTEGER DEFAULT 0, last_requested INTEGER DEFAULT 0);
+        CREATE TABLE icon_mapping (id INTEGER PRIMARY KEY, page_url LONGVARCHAR NOT NULL, icon_id INTEGER);
+        """
+    )
+    db.execute("INSERT INTO favicons VALUES (1, 'https://example.com/favicon.ico', 1)")
+    db.execute(
+        "INSERT INTO favicon_bitmaps (id, icon_id, image_data, width, height) VALUES (1, 1, ?, 16, 16)",
+        (tiny_png((200, 40, 40)),),
+    )
+    db.execute(
+        "INSERT INTO favicon_bitmaps (id, icon_id, image_data, width, height) VALUES (2, 1, ?, 256, 256)",
+        (b"too big",),
+    )
+    db.execute("INSERT INTO icon_mapping VALUES (1, 'https://example.com/visited', 1)")
+    db.commit()
+    db.close()
+
+
+def write_arc_form_history(path):
+    """Arc's (Chromium's) form history, which Zen can't import (it's off)."""
+    db = sqlite3.connect(path)
+    db.execute(
+        "CREATE TABLE autofill (name VARCHAR, value VARCHAR, value_lower VARCHAR, date_created INTEGER DEFAULT 0, "
+        "date_last_used INTEGER DEFAULT 0, count INTEGER DEFAULT 1, PRIMARY KEY (name, value))"
+    )
+    db.execute(
+        "INSERT INTO autofill VALUES ('email', 'someone@example.com', 'someone@example.com', 1700000000, 1700000000, 1)"
+    )
+    db.commit()
+    db.close()
+
+
 class Env:
     """
     An isolated ZenX: its own profile root and remoting name (through a test
@@ -463,6 +529,8 @@ class Env:
         self.arc_dir = self.tmp / "Arc"
         (self.arc_dir / "User Data" / "Default").mkdir(parents=True)
         (self.arc_dir / "User Data" / "Profile 1").mkdir(parents=True)
+        write_arc_favicons(self.arc_dir / "User Data" / "Default" / "Favicons")
+        write_arc_form_history(self.arc_dir / "User Data" / "Default" / "Web Data")
         sidebar, self.expected_arc = synthetic_arc()
         (self.arc_dir / "StorableSidebar.json").write_text(
             json.dumps(sidebar, ensure_ascii=False)
@@ -562,6 +630,9 @@ class Env:
                 time.sleep(0.3)
         instance = Instance(port, process, profile_dir)
         self.instances.append(instance)
+        # Preloaded profiles would start outside the harness (see
+        # install_profile_launcher); scenario_preload_profiles turns it on.
+        instance.js('Services.prefs.setBoolPref("zenx.profile-spaces.preload", false);')
         actual = instance.js('return Services.dirsvc.get("ProfD", Ci.nsIFile).path;')
         if not str(actual).startswith(str(self.app_data)):
             instance.quit()
@@ -801,6 +872,28 @@ def scenario_first_run(env):
     )
 
 
+def check_arc_tabs_look_loaded(inst, label):
+    """Imported tabs show their Arc title and icon before they are loaded."""
+    tabs = inst.js(
+        """
+        const win = await Z.ready();
+        const arcSpaces = new Set(win.gZenWorkspaces.getWorkspaces().filter(s => s.zenxArcId).map(s => s.uuid));
+        return win.gZenWorkspaces.allStoredTabs
+          .filter(t => !t.hasAttribute("zen-empty-tab") && t.hasAttribute("pending")
+            && (t.hasAttribute("zen-essential") || arcSpaces.has(t.getAttribute("zen-workspace-id"))))
+          .map(t => ({ label: t.label, icon: (t.getAttribute("image") || "").startsWith("data:image/png") }));
+        """
+    )
+    check(tabs, f"{label}: imported tabs are there, not loaded yet")
+    untitled = [t for t in tabs if t["label"] == "New Tab"]
+    check(
+        not untitled,
+        f"{label}: no imported tab says 'New Tab' ({len(untitled)} of {len(tabs)})",
+    )
+    no_icon = [t["label"] for t in tabs if not t["icon"]]
+    check(not no_icon, f"{label}: imported tabs have Arc's icon (missing: {no_icon})")
+
+
 def scenario_import_into_empty(env):
     inst = env.launch()
     inst.js("await Z.ready();")
@@ -810,6 +903,23 @@ def scenario_import_into_empty(env):
     check(ui_responsive(inst), "UI responds to a space switch right after import")
     check_arc_spaces(env, inst.js("return Z.spaces();"), "after import")
     check(inst.js("return Z.essentials();") == 1, "favorite became an essential")
+    check_arc_tabs_look_loaded(inst, "after import")
+    offered = inst.js(
+        """
+        const { MigrationUtils } = Z.module("resource:///modules/MigrationUtils.sys.mjs");
+        const migrator = await MigrationUtils.getMigrator("arc");
+        const profile = (await migrator.getSourceProfiles()).find(p => p.id === "Default");
+        const types = MigrationUtils.resourceTypes;
+        const names = Object.fromEntries(Object.entries(types).map(([k, v]) => [v, k]));
+        return (await migrator.getResources(profile)).map(r => names[r.type]);
+        """
+    )
+    check(
+        "FORMDATA" not in offered and "BOOKMARKS" in offered,
+        f"form history isn't offered, Zen has it off: {offered}",
+    )
+    others = [sp["name"] for sp in inst.js("return Z.spaces();") if not sp["arc"]]
+    check(others, "an import later than the first start keeps Zen's starter space")
     check_space_menu(inst, "after import", expect_profiles=0)
     for n in (1, 2):
         inst = restart(env, inst)
@@ -823,6 +933,7 @@ def scenario_import_into_empty(env):
             ],
         )
         check_arc_spaces(env, inst.js("return Z.spaces();"), f"after restart {n}")
+        check_arc_tabs_look_loaded(inst, f"after restart {n}")
         check(ui_responsive(inst), f"UI responds after restart {n}")
 
 
@@ -877,11 +988,17 @@ def scenario_import_from_welcome(env):
     spaces must arrive once the welcome screen is done.
     """
     inst = env.launch()
-    res = welcome_import_debug(inst, lambda: inst.js(
-        """
+    res = welcome_import_debug(
+        inst,
+        lambda: inst.js(
+            """
         const win = await Z.ready();
         // Headless runs skip Zen's welcome screen; put the window in its state.
         win.document.documentElement.setAttribute("zen-welcome-stage", "true");
+        // And the first-run page Zen opens in its starter space (not loaded).
+        win.gBrowser.addTrustedTab(Services.urlFormatter.formatURLPref("startup.homepage_welcome_url"), {
+          createLazyBrowser: true, inBackground: true, skipAnimation: true,
+        });
         const { MigrationUtils } = Z.module("resource:///modules/MigrationUtils.sys.mjs");
         const url = "chrome://browser/content/migration/migration-dialog-window.html";
         // A modal window: opening it blocks until it closes.
@@ -923,7 +1040,8 @@ def scenario_import_from_welcome(env):
         await Z.until(() => !win.gZenWorkspaces.isChangingWorkspace, "space switch to settle", 10000);
         return { finished, message, during, afterDialog };
         """
-    ))
+        ),
+    )
     print(f"    {res}")
     check(res["finished"], "the wizard finishes during the welcome screen")
     check(
@@ -935,6 +1053,10 @@ def scenario_import_from_welcome(env):
         "nothing changes in the window while the welcome screen runs",
     )
     check_arc_spaces(env, inst.js("return Z.spaces();"), "after the welcome screen")
+    others = [sp["name"] for sp in inst.js("return Z.spaces();") if not sp["arc"]]
+    check(
+        not others, f"the first start's import replaces Zen's starter space: {others}"
+    )
     check(ui_responsive(inst), "UI responds after importing from the welcome screen")
 
 
@@ -955,6 +1077,10 @@ def scenario_import_other_arc_profile(env):
     )
     b = env.connect_launched(a)
     b_spaces = b.js("await Z.ready(); return Z.spaces();")
+    check(
+        b.js("return Z.win().document.documentElement.hasAttribute('zenx-hidden');"),
+        "the new profile imports in the background, its window stays hidden",
+    )
     arc_b = [s for s in b_spaces if s["arc"]]
     check(
         [(s["name"], s["icon"], s["pinned"]) for s in arc_b]
@@ -1002,9 +1128,16 @@ def scenario_import_all_arc_profiles(env):
         f"all Arc profiles are offered first: {res['first']!r} {res['firstName']!r}",
     )
     check_arc_spaces(env, a.js("return Z.spaces();"), "all profiles, current")
-    check(a.js("return Z.essentials();") == 1, "all profiles: favorite became an essential")
+    check(
+        a.js("return Z.essentials();") == 1,
+        "all profiles: favorite became an essential",
+    )
     b = env.connect_launched(a)
     b_spaces = b.js("await Z.ready(); return Z.spaces();")
+    check(
+        b.js("return Z.win().document.documentElement.hasAttribute('zenx-hidden');"),
+        "the new profile imports in the background, its window stays hidden",
+    )
     check(
         [(s["name"], bool(s["arc"]), s["pinned"]) for s in b_spaces]
         == [("Other profile", True, 2)],
@@ -1021,8 +1154,14 @@ def scenario_import_all_arc_profiles(env):
         "const want = args[0]; return await Z.until(() => { const s = Z.switcher(); return s.length === want && s; }, 'all spaces in the switcher', 20000).catch(() => Z.switcher());",
         len(want),
     )
-    check(sorted(a_switcher) == want, f"all profiles: current window lists every space: {a_switcher}")
-    check(sorted(b_switcher) == want, f"all profiles: Arc Fun's window lists every space: {b_switcher}")
+    check(
+        sorted(a_switcher) == want,
+        f"all profiles: current window lists every space: {a_switcher}",
+    )
+    check(
+        sorted(b_switcher) == want,
+        f"all profiles: Arc Fun's window lists every space: {b_switcher}",
+    )
     check(a_switcher == b_switcher, "all profiles: both windows show one order")
     total = sum(s["pinned"] + s["normal"] for s in env.expected_arc.values()) + 1 + 2
     check(
@@ -1031,11 +1170,10 @@ def scenario_import_all_arc_profiles(env):
     )
 
 
-def scenario_one_window_on_quit(env):
+def switch_to_other_profile(env):
     """
-    Switching to another profile's space hides this profile's window behind
-    it. When the profile in front quits, the hidden window comes back in its
-    place, so there's never no window.
+    A imports an Arc profile into a new profile B, then switches to B's space:
+    B's window takes A's place and A's is hidden. Returns (a, b).
     """
     a = env.launch()
     a.js("await Z.ready();")
@@ -1043,31 +1181,164 @@ def scenario_one_window_on_quit(env):
     import_arc(a, "Profile 1", timeout_ms=120000)
     b = env.connect_launched(a)
     b.js("await Z.ready();")
-    a.js(
+    target = a.js(
         """
         const win = await Z.ready();
         const button = await Z.until(() => win.document.querySelector("#zen-workspaces-button .zenx-remote-space"), "a space of B in A's switcher", 20000);
         button.doCommand();
         await Z.until(() => win.document.documentElement.hasAttribute("zenx-hidden"), "A hidden", 15000);
+        return button.getAttribute("zenx-space-id");
         """
     )
-    b.js(
-        """
+    # The space slides out of A and into B; both end up in place.
+    placed = """
         const win = Z.win();
-        win.resizeTo(900, 650);
-        win.moveTo(120, 70);
-        await Z.until(() => win.screenX === 120 && win.outerWidth === 900, "B moved", 5000);
-        """
+        const ws = win.gZenWorkspaces;
+        await Z.until(() => ws.workspaceElement(ws.activeWorkspace)?.style.transform === "translateX(0%)", "space in place", 5000).catch(() => {});
+        return { active: ws.activeWorkspace, transform: ws.workspaceElement(ws.activeWorkspace)?.style.transform };
+    """
+    b_state = b.js(placed)
+    check(b_state["active"] == target, "B is on the space picked in A")
+    check(
+        b_state["transform"] == "translateX(0%)",
+        f"B's space slid into place: {b_state['transform']}",
     )
+    a_state = a.js(placed)
+    check(
+        a_state["transform"] == "translateX(0%)",
+        f"A's space is back in place behind B: {a_state['transform']}",
+    )
+    return a, b
+
+
+def wait_exit(inst, timeout=30):
+    start = time.time()
+    while time.time() - start < timeout:
+        if inst.process.poll() is not None:
+            return True
+        time.sleep(0.3)
+    return False
+
+
+def scenario_one_quit_for_all(env):
+    """
+    ZenX is one app: quitting the profile in front also quits the profile
+    hidden behind it, instead of showing its window (no second Cmd+Q).
+    """
+    a, b = switch_to_other_profile(env)
     b.quit()
     env.instances.remove(b)
-    frame = a.js(
+    check(wait_exit(a), "A quits together with B")
+    env.instances.remove(a)
+
+
+def scenario_preload_profiles(env):
+    """
+    The other profiles start in the background after startup, with a hidden
+    window, so switching to their spaces needs no new process. A preloaded
+    profile doesn't become the one the next start opens.
+    """
+    a = env.launch()
+    a.js("await Z.ready();")
+    env.install_profile_launcher(a)
+    import_arc(a, "Profile 1", timeout_ms=120000)
+    b = env.connect_launched(a)
+    b.js("await Z.ready();")
+    b.quit()
+    env.instances.remove(b)
+    a.quit()
+    env.instances.remove(a)
+
+    def start_with_preload():
+        front = env.launch()
+        env.install_profile_launcher(front)
+        front.js('Services.prefs.setBoolPref("zenx.profile-spaces.preload", true);')
+        other = env.connect_launched(front)
+        check(
+            other.profile_dir != front.profile_dir,
+            "the other profile is started in the background",
+        )
+        hidden = other.js(
+            """
+            const win = await Z.ready();
+            return win.document.documentElement.hasAttribute("zenx-hidden");
+            """
+        )
+        check(hidden, "its window stays hidden")
+        return front, other
+
+    front, other = start_with_preload()
+    front_dir = front.profile_dir
+    front.quit()
+    env.instances.remove(front)
+    env.instances.remove(other)
+    other_exited = False
+    for _ in range(60):
+        try:
+            with socket.create_connection(("127.0.0.1", other.port), timeout=0.5):
+                pass
+        except OSError:
+            other_exited = True
+            break
+        time.sleep(0.5)
+    check(other_exited, "the preloaded profile quits with the one in front")
+
+    front, other = start_with_preload()
+    check(
+        front.profile_dir == front_dir,
+        "the next start opens the same profile, not the preloaded one",
+    )
+    front.js(
         """
-        await Z.until(() => !Z.win().document.documentElement.hasAttribute("zenx-hidden"), "A shown after B quit", 15000);
-        return Z.zenx().windowFrame(Z.win());
+        const win = await Z.ready();
+        const button = await Z.until(() => win.document.querySelector("#zen-workspaces-button .zenx-remote-space"), "a space of the other profile in the switcher", 20000);
+        button.doCommand();
+        await Z.until(() => win.document.documentElement.hasAttribute("zenx-hidden"), "front hidden", 15000);
         """
     )
-    check(frame == "120,70,900,650", f"A's window comes back in B's place when B quits: {frame}")
+    shown = other.js(
+        """
+        return await Z.until(() => !Z.win().document.documentElement.hasAttribute("zenx-hidden"), "shown", 10000).catch(() => false);
+        """
+    )
+    check(shown, "switching shows the preloaded profile's window")
+    relaunched = front.js(
+        'return Services.prefs.getStringPref("zenx.e2e.last-launch", "");'
+    )
+    check(not relaunched, "no new process for the switch")
+
+
+def scenario_last_window_closed(env):
+    """
+    Closing the last window of the profile in front leaves the app without
+    windows (macOS): the hidden profile's window doesn't come back. A quit
+    after that still quits both.
+    """
+    a, b = switch_to_other_profile(env)
+    # B has no window for Marionette once it's closed, so B quits by a timer.
+    b.js(
+        """
+        const close = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+        const quit = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+        Services.__zenxE2ETimers = [close, quit];
+        close.initWithCallback(() => Z.win().close(), 200, Ci.nsITimer.TYPE_ONE_SHOT);
+        quit.initWithCallback(() => Services.startup.quit(Ci.nsIAppStartup.eAttemptQuit), 5000, Ci.nsITimer.TYPE_ONE_SHOT);
+        """
+    )
+    try:
+        b.client.delete_session(send_request=False)
+    except Exception:
+        pass
+    env.instances.remove(b)
+    time.sleep(2.5)
+    still_hidden = a.js(
+        """
+        return Z.win().document.documentElement.hasAttribute("zenx-hidden");
+        """
+    )
+    check(still_hidden, "A stays hidden when B's last window closes")
+    check(wait_exit(a), "A quits when B quits after that")
+    env.instances.remove(a)
 
 
 def scenario_new_profile_and_switching(env):
@@ -1256,7 +1527,9 @@ def scenario_new_profile_and_switching(env):
     )
     check(a_hidden, "A's window is hidden behind it")
     check(
-        not b.js("return Z.win().document.documentElement.hasAttribute('zenx-hidden');"),
+        not b.js(
+            "return Z.win().document.documentElement.hasAttribute('zenx-hidden');"
+        ),
         "B's window is shown",
     )
 
@@ -1424,7 +1697,9 @@ SCENARIOS = [
     scenario_import_other_arc_profile,
     scenario_import_all_arc_profiles,
     scenario_new_profile_and_switching,
-    scenario_one_window_on_quit,
+    scenario_one_quit_for_all,
+    scenario_last_window_closed,
+    scenario_preload_profiles,
     scenario_delete_profile,
     scenario_restart_with_two_profiles,
 ]

@@ -7,7 +7,12 @@
  * space. Other profiles send it when one of this profile's spaces is clicked
  * in their switcher, with `--zenx-frame x,y,w,h --zenx-from <profile id>` so
  * this window takes the place of theirs and they hide it (`--zenx-hide`).
- * `--zenx-show` brings back a hidden window when the one in front goes away.
+ * With `--zenx-slide right|left` the space slides in from that side,
+ * finishing the slide the other window started.
+ * `--zenx-show` brings back a hidden window when the one in front restarts,
+ * and `--zenx-quit` quits a profile in the background when the one in front
+ * quits. `--zenx-preload <profile id>` starts a profile in the background,
+ * with its window hidden, and `--zenx-ping` tells whether one is running.
  *
  * It runs before Firefox's and Zen's handlers so that the whole command line
  * is used up. When the profile wasn't reachable directly, the request comes
@@ -30,16 +35,41 @@ export class ZenXCommandLineHandler {
   QueryInterface = ChromeUtils.generateQI(["nsICommandLineHandler"]);
 
   handle(cmdLine) {
+    if (cmdLine.handleFlag("zenx-ping", false)) {
+      cmdLine.preventDefault = true;
+      return;
+    }
+    let preloadedBy = null;
+    try {
+      preloadedBy = cmdLine.handleFlagWithParam("zenx-preload", false);
+    } catch (e) {}
+    if (
+      preloadedBy &&
+      cmdLine.state === Ci.nsICommandLine.STATE_INITIAL_LAUNCH
+    ) {
+      // The window still opens (and restores the session), hidden.
+      lazy.ZenXProfileSpaces.startInBackground(parseInt(preloadedBy));
+      return;
+    }
+    if (cmdLine.handleFlag("zenx-quit", false)) {
+      cmdLine.preventDefault = true;
+      lazy.ZenXProfileSpaces.quitIfInBackground();
+      return;
+    }
     if (cmdLine.handleFlag("zenx-hide", false)) {
       cmdLine.preventDefault = true;
       lazy.ZenXProfileSpaces.hideWindows();
       return;
     }
-    let uuid, frame, from;
+    let uuid, frame, from, slide;
     try {
       uuid = cmdLine.handleFlagWithParam(ZENX_SPACE_FLAG, false);
       frame = cmdLine.handleFlagWithParam("zenx-frame", false);
       from = cmdLine.handleFlagWithParam("zenx-from", false);
+      slide =
+        { left: -1, right: 1 }[
+          cmdLine.handleFlagWithParam("zenx-slide", false)
+        ] ?? 0;
     } catch (e) {
       return;
     }
@@ -75,14 +105,15 @@ export class ZenXCommandLineHandler {
       return;
     }
     cmdLine.preventDefault = true;
-    if (uuid) {
+    if (uuid && !slide) {
       win.gZenWorkspaces
         .changeWorkspaceFromCommandLine(uuid)
         .catch(console.error);
     }
-    lazy.ZenXProfileSpaces.takeWindowPlace(win, frame, fromProfileId).catch(
-      console.error
-    );
+    lazy.ZenXProfileSpaces.takeWindowPlace(win, frame, fromProfileId, {
+      spaceUuid: slide ? uuid : null,
+      slide,
+    }).catch(console.error);
   }
 
   get helpInfo() {

@@ -804,6 +804,12 @@ class nsZenShareManager extends nsZenDOMOperatedFeature {
       lazyTabTitle: item.label || undefined,
       skipRoute: true,
     });
+    // ZenX: Zen's label gate drops lazyTabTitle, the tab said "New Tab".
+    if (item.label) {
+      tab._zenChangeLabelFlag = true;
+      gBrowser.setInitialTabTitle(tab, item.label, { isContentTitle: true });
+      delete tab._zenChangeLabelFlag;
+    }
     if (workspaceId) {
       tab.setAttribute("zen-workspace-id", workspaceId);
     }

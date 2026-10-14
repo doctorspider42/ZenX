@@ -5,3 +5,8 @@
 # Spaces bound to Firefox profiles (src/zenx/ZenXProfileSpaces.sys.mjs).
 - name: zenx.profile-spaces.enabled
   value: true
+
+# Other profiles of the group start in the background, without a window or
+# Dock icon, so switching to their spaces is instant.
+- name: zenx.profile-spaces.preload
+  value: true

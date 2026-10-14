@@ -8,13 +8,21 @@
  */
 
 import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
-import { parseArcSidebar } from "resource:///modules/zenx/arc/ZenXArcSidebar.sys.mjs";
+import {
+  addArcFavicons,
+  forEachArcTab,
+  parseArcSidebar,
+} from "resource:///modules/zenx/arc/ZenXArcSidebar.sys.mjs";
 
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+  ZenXProfileSpaces: "resource:///modules/zenx/ZenXProfileSpaces.sys.mjs",
+  MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
+  TabStateCache:
+    "moz-src:///browser/components/sessionstore/TabStateCache.sys.mjs",
 });
 
 /** Path of Arc's sidebar file, next to its Chromium "User Data" folder. */
@@ -51,6 +59,100 @@ export async function readArcSidebar(
     return null;
   }
   return parseArcSidebar(await IOUtils.readJSON(path), { profileDirectory });
+}
+
+// Tab icons are drawn at 16px, twice that on Retina screens.
+const FAVICON_MAX_WIDTH = 32;
+
+/**
+ * Gives the tabs of a parsed sidebar their icons from Arc's (Chromium's)
+ * Favicons database. Without them imported tabs have no icon until they
+ * load.
+ *
+ * @param {object} aParsed result of readArcSidebar(), changed in place
+ * @param {string} [profileDirectory="Default"]
+ */
+export async function addArcFaviconsFromProfile(
+  aParsed,
+  profileDirectory = "Default"
+) {
+  const userData = getArcUserDataPath();
+  const path =
+    userData && PathUtils.join(userData, profileDirectory, "Favicons");
+  if (!path || !(await IOUtils.exists(path))) {
+    return;
+  }
+  const query = sql =>
+    lazy.MigrationUtils.getRowsFromDBWithoutLocks(path, "Arc Favicons", sql);
+  // Which bitmap each page gets is picked without loading the images, the
+  // database holds icons of every page Arc ever visited.
+  const bitmapByPage = new Map();
+  for (const row of await query(
+    `SELECT map.page_url, bit.id, bit.width FROM icon_mapping map
+       INNER JOIN favicon_bitmaps bit ON (map.icon_id = bit.icon_id)`
+  )) {
+    const page = row.getResultByName("page_url");
+    const width = row.getResultByName("width");
+    const best = bitmapByPage.get(page);
+    // The largest one up to FAVICON_MAX_WIDTH, else the smallest.
+    if (
+      !best ||
+      (width <= FAVICON_MAX_WIDTH
+        ? best.width > FAVICON_MAX_WIDTH || width > best.width
+        : best.width > FAVICON_MAX_WIDTH && width < best.width)
+    ) {
+      bitmapByPage.set(page, { id: row.getResultByName("id"), width });
+    }
+  }
+  // Bitmap ids first, replaced by the images below.
+  addArcFavicons(
+    aParsed,
+    new Map([...bitmapByPage].map(([page, { id }]) => [page, `${id}`]))
+  );
+  const images = new Map();
+  forEachArcTab(aParsed, tab => tab.image && images.set(tab.image, null));
+  const ids = [...images.keys()].map(Number).filter(Number.isInteger);
+  if (ids.length) {
+    for (const row of await query(
+      `SELECT id, image_data FROM favicon_bitmaps WHERE id IN (${ids.join(",")})`
+    )) {
+      const data = new Uint8Array(row.getResultByName("image_data"));
+      images.set(
+        `${row.getResultByName("id")}`,
+        `data:image/png;base64,${data.toBase64()}`
+      );
+    }
+  }
+  forEachArcTab(aParsed, tab => {
+    const image = tab.image && images.get(tab.image);
+    if (image) {
+      tab.image = image;
+    } else {
+      delete tab.image;
+    }
+  });
+}
+
+/**
+ * Zen only changes the label of a tab that isn't shown when it's flagged
+ * (`#setTabLabel` in Zen's Tabbrowser patch), and the flag doesn't get
+ * through `setInitialTabTitle`. So a lazy tab says "New Tab" instead of its
+ * `lazyTabTitle` until it is loaded, or the session is restored.
+ *
+ * @param {object} aGBrowser the window's gBrowser
+ * @param {MozTabbrowserTab} aTab
+ * @param {?string} aLabel
+ */
+export function showImportedTabLabel(aGBrowser, aTab, aLabel) {
+  if (!aLabel) {
+    return;
+  }
+  aTab._zenChangeLabelFlag = true;
+  try {
+    aGBrowser.setInitialTabTitle(aTab, aLabel, { isContentTitle: true });
+  } finally {
+    delete aTab._zenChangeLabelFlag;
+  }
 }
 
 const MIGRATION_DIALOG_URL =
@@ -102,11 +204,15 @@ export function getArcImportWindow() {
  *
  * @param {object} aParsed result of parseArcSidebar()
  * @param {Window} [aWindow] defaults to the most recent browser window
+ * @param {object} [aOptions]
+ * @param {boolean} [aOptions.firstRun] imported on the first start (from
+ *   Zen's welcome screen): Zen's starter spaces go, the Arc ones replace them
  * @returns {Promise<{spaces: number, tabs: number, essentials: number}>}
  */
 export async function importArcIntoWindow(
   aParsed,
-  aWindow = getArcImportWindow()
+  aWindow = getArcImportWindow(),
+  { firstRun = false } = {}
 ) {
   const { gZenWorkspaces, gZenShareManager, gZenPinnedTabManager, gBrowser } =
     aWindow;
@@ -166,6 +272,14 @@ export async function importArcIntoWindow(
       lazyTabTitle: essential.label || undefined,
       skipRoute: true,
     });
+    showImportedTabLabel(gBrowser, tab, essential.label);
+    if (essential.image) {
+      gBrowser.setIcon(tab, essential.image);
+      // As ZenShareManager does: the session keeps the tab's icon.
+      lazy.TabStateCache.update(tab.linkedBrowser.permanentKey, {
+        image: null,
+      });
+    }
     if (gZenPinnedTabManager.addToEssentials(tab)) {
       result.essentials++;
     } else {
@@ -183,6 +297,9 @@ export async function importArcIntoWindow(
   await gZenWorkspaces.changeWorkspaceWithID(
     firstImported?.uuid ?? previousSpace
   );
+  if (firstRun) {
+    await lazy.ZenXProfileSpaces.removeStarterSpaces(aWindow);
+  }
   return result;
 }
 
