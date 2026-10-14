@@ -495,6 +495,20 @@ def write_arc_favicons(path):
     db.close()
 
 
+def write_arc_form_history(path):
+    """Arc's (Chromium's) form history, which Zen can't import (it's off)."""
+    db = sqlite3.connect(path)
+    db.execute(
+        "CREATE TABLE autofill (name VARCHAR, value VARCHAR, value_lower VARCHAR, date_created INTEGER DEFAULT 0, "
+        "date_last_used INTEGER DEFAULT 0, count INTEGER DEFAULT 1, PRIMARY KEY (name, value))"
+    )
+    db.execute(
+        "INSERT INTO autofill VALUES ('email', 'someone@example.com', 'someone@example.com', 1700000000, 1700000000, 1)"
+    )
+    db.commit()
+    db.close()
+
+
 class Env:
     """
     An isolated ZenX: its own profile root and remoting name (through a test
@@ -516,6 +530,7 @@ class Env:
         (self.arc_dir / "User Data" / "Default").mkdir(parents=True)
         (self.arc_dir / "User Data" / "Profile 1").mkdir(parents=True)
         write_arc_favicons(self.arc_dir / "User Data" / "Default" / "Favicons")
+        write_arc_form_history(self.arc_dir / "User Data" / "Default" / "Web Data")
         sidebar, self.expected_arc = synthetic_arc()
         (self.arc_dir / "StorableSidebar.json").write_text(
             json.dumps(sidebar, ensure_ascii=False)
@@ -889,6 +904,20 @@ def scenario_import_into_empty(env):
     check_arc_spaces(env, inst.js("return Z.spaces();"), "after import")
     check(inst.js("return Z.essentials();") == 1, "favorite became an essential")
     check_arc_tabs_look_loaded(inst, "after import")
+    offered = inst.js(
+        """
+        const { MigrationUtils } = Z.module("resource:///modules/MigrationUtils.sys.mjs");
+        const migrator = await MigrationUtils.getMigrator("arc");
+        const profile = (await migrator.getSourceProfiles()).find(p => p.id === "Default");
+        const types = MigrationUtils.resourceTypes;
+        const names = Object.fromEntries(Object.entries(types).map(([k, v]) => [v, k]));
+        return (await migrator.getResources(profile)).map(r => names[r.type]);
+        """
+    )
+    check(
+        "FORMDATA" not in offered and "BOOKMARKS" in offered,
+        f"form history isn't offered, Zen has it off: {offered}",
+    )
     others = [sp["name"] for sp in inst.js("return Z.spaces();") if not sp["arc"]]
     check(others, "an import later than the first start keeps Zen's starter space")
     check_space_menu(inst, "after import", expect_profiles=0)

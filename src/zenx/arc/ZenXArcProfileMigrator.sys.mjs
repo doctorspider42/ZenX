@@ -162,7 +162,12 @@ export class ArcProfileMigrator extends ChromeProfileMigrator {
       }
       return [...types].map(type => ({ type, migrate: done => done(false) }));
     }
-    const resources = await super.getResources(aProfile);
+    const resources = (await super.getResources(aProfile)).filter(
+      resource =>
+        // Zen turns form history off, importing into it can only fail.
+        resource.type != MigrationUtils.resourceTypes.FORMDATA ||
+        Services.prefs.getBoolPref("browser.formfill.enable", true)
+    );
     const sidebar = await readArcSidebar(
       aProfile?.id ?? DEFAULT_ARC_PROFILE
     ).catch(e => {
