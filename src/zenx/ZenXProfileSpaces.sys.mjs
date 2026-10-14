@@ -366,10 +366,30 @@ class nsZenXProfileSpaces {
    */
   orderSpaces(aFallbackOrder) {
     const present = new Set(aFallbackOrder);
-    const ordered = readJSONPref(ORDER_PREF, []).filter(uuid =>
-      present.has(uuid)
-    );
-    const known = new Set(ordered);
+    // A space moved to another profile has a new uuid there; it takes the
+    // place of the original, whichever profile's update arrives first.
+    const movedTo = new Map();
+    for (const { spaces } of this.getRemoteSpaces()) {
+      for (const space of spaces) {
+        if (space.movedFrom && present.has(space.uuid)) {
+          movedTo.set(space.movedFrom, space.uuid);
+        }
+      }
+    }
+    const ordered = [];
+    const known = new Set();
+    const add = uuid => {
+      if (present.has(uuid) && !known.has(uuid)) {
+        known.add(uuid);
+        ordered.push(uuid);
+      }
+    };
+    for (const uuid of readJSONPref(ORDER_PREF, [])) {
+      if (movedTo.has(uuid)) {
+        add(movedTo.get(uuid));
+      }
+      add(uuid);
+    }
     for (const uuid of aFallbackOrder) {
       if (!known.has(uuid)) {
         ordered.push(uuid);
@@ -401,9 +421,14 @@ class nsZenXProfileSpaces {
    *
    * @param {string} aOldUuid
    * @param {string} aNewUuid
+   * @param {Array<string>} [aFallbackOrder] used when the shared order
+   *   doesn't know the space (yet)
    */
-  #replaceInOrder(aOldUuid, aNewUuid) {
-    const order = readJSONPref(ORDER_PREF, []);
+  #replaceInOrder(aOldUuid, aNewUuid, aFallbackOrder = []) {
+    let order = readJSONPref(ORDER_PREF, []);
+    if (!order.includes(aOldUuid) && Array.isArray(aFallbackOrder)) {
+      order = aFallbackOrder.slice();
+    }
     const index = order.indexOf(aOldUuid);
     if (index === -1 || !this.active) {
       return;
@@ -582,14 +607,13 @@ class nsZenXProfileSpaces {
 
     // Remember where every space is before this one moves out, so it keeps
     // its place: until now there may have been no shared order at all.
-    this.setSpaceOrder(
-      this.orderSpaces([
-        ...aWindow.gZenWorkspaces.getWorkspaces().map(space => space.uuid),
-        ...this.getRemoteSpaces().flatMap(({ spaces }) =>
-          spaces.map(space => space.uuid)
-        ),
-      ])
-    );
+    const order = this.orderSpaces([
+      ...aWindow.gZenWorkspaces.getWorkspaces().map(space => space.uuid),
+      ...this.getRemoteSpaces().flatMap(({ spaces }) =>
+        spaces.map(space => space.uuid)
+      ),
+    ]);
+    this.setSpaceOrder(order);
 
     const handoffId = Services.uuid.generateUUID().toString().slice(1, -1);
     const handoffPref = HANDOFF_PREFIX + profile.id;
@@ -600,6 +624,9 @@ class nsZenXProfileSpaces {
       from: this.currentProfileId,
       at: Date.now(),
       space: serialized.item,
+      // The shared order reaches the database asynchronously, the target may
+      // start before it does.
+      order,
     };
     const pending = readJSONPref(PENDING_MOVES_PREF, {});
     pending[aSpaceUuid] = { target: profile.id, handoffId, at: Date.now() };
@@ -647,6 +674,9 @@ class nsZenXProfileSpaces {
     );
     await this.disableStartupProfileSelector();
     await this.#refreshProfiles();
+    // The first new profile also makes this one part of a profile group,
+    // which knows nothing about this profile's spaces yet.
+    this.#publishRegistry();
     return profile;
   }
 
@@ -889,7 +919,7 @@ class nsZenXProfileSpaces {
         !this.#hasSpaceMovedFrom(win, handoff.space.sourceUuid)
       ) {
         try {
-          await this.#importSpace(win, handoff.space);
+          await this.#importSpace(win, handoff.space, handoff.order);
         } catch (e) {
           console.error("ZenX: could not import space from another profile", e);
           continue;
@@ -954,7 +984,7 @@ class nsZenXProfileSpaces {
       .some(space => space.zenxMovedFrom === aSourceUuid);
   }
 
-  async #importSpace(aWindow, aItem) {
+  async #importSpace(aWindow, aItem, aOrder) {
     const { gZenWorkspaces, gZenShareManager, gZenThemePicker } = aWindow;
     const workspace = await gZenShareManager.importSpace({
       type: "space",
@@ -965,7 +995,7 @@ class nsZenXProfileSpaces {
       throw new Error("Spaces are disabled in this window");
     }
     workspace.zenxMovedFrom = aItem.sourceUuid;
-    this.#replaceInOrder(aItem.sourceUuid, workspace.uuid);
+    this.#replaceInOrder(aItem.sourceUuid, workspace.uuid, aOrder);
     if (aItem.icon) {
       workspace.icon = aItem.icon;
     }

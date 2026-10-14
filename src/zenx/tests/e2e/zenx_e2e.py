@@ -1010,6 +1010,20 @@ def scenario_import_all_arc_profiles(env):
         == [("Other profile", True, 2)],
         f"all profiles: Arc Fun's space in its own profile: {b_spaces}",
     )
+    # Both windows show the spaces of both profiles, in the same order.
+    a_names = sorted(s["name"] for s in a.js("return Z.spaces();"))
+    want = sorted(a_names + ["Other profile"])
+    a_switcher = a.js(
+        "const want = args[0]; return await Z.until(() => { const s = Z.switcher(); return s.length === want && s; }, 'all spaces in the switcher', 20000).catch(() => Z.switcher());",
+        len(want),
+    )
+    b_switcher = b.js(
+        "const want = args[0]; return await Z.until(() => { const s = Z.switcher(); return s.length === want && s; }, 'all spaces in the switcher', 20000).catch(() => Z.switcher());",
+        len(want),
+    )
+    check(sorted(a_switcher) == want, f"all profiles: current window lists every space: {a_switcher}")
+    check(sorted(b_switcher) == want, f"all profiles: Arc Fun's window lists every space: {b_switcher}")
+    check(a_switcher == b_switcher, "all profiles: both windows show one order")
     total = sum(s["pinned"] + s["normal"] for s in env.expected_arc.values()) + 1 + 2
     check(
         str(total) in res["message"],
