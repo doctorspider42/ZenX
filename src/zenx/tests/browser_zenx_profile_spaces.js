@@ -93,6 +93,9 @@ add_task(async function test_shows_and_opens_spaces_of_other_profiles() {
         frame,
         "--zenx-from",
         `${ZenXProfileSpaces.currentProfileId}`,
+        // It comes after this window's spaces in the switcher.
+        "--zenx-slide",
+        "right",
       ],
       true,
     ],

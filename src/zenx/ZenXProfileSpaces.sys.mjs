@@ -68,6 +68,8 @@ const IMPORT_TIMEOUT_MS = 10 * 60 * 1000;
 const FORMAT_VERSION = 1;
 // Fade-in of a profile's window over the one it replaces.
 const WINDOW_FADE_MS = 160;
+// How long a window that slid its space out waits to be covered.
+const SLIDE_OUT_WAIT_MS = 1500;
 const PUBLISH_DELAY_MS = 500;
 const MAX_IMPORTED_HANDOFFS = 50;
 // Tabs whose URL cannot be reopened in another profile.
@@ -586,8 +588,18 @@ class nsZenXProfileSpaces {
    * @param {Window} aWindow
    * @param {?string} aFrame see windowFrame()
    * @param {?number} aFromProfileId profile whose window to hide
+   * @param {object} [aOptions]
+   * @param {?string} [aOptions.spaceUuid] space to show, switched to without
+   *   Zen's animation: it slides in instead
+   * @param {number} [aOptions.slide] 1 to slide the space in from the right,
+   *   -1 from the left, 0 not to
    */
-  async takeWindowPlace(aWindow, aFrame, aFromProfileId) {
+  async takeWindowPlace(
+    aWindow,
+    aFrame,
+    aFromProfileId,
+    { spaceUuid = null, slide = 0 } = {}
+  ) {
     const fade = !!aFrame && !!this.#dock;
     if (fade) {
       this.#setWindowOpacity(aWindow, 0);
@@ -596,6 +608,15 @@ class nsZenXProfileSpaces {
     for (const win of lazy.BrowserWindowTracker.orderedWindows) {
       if (win.document.documentElement.hasAttribute("zenx-hidden")) {
         this.#setWindowVisible(win, true);
+      }
+    }
+    // Shown first too: a window that has never been shown doesn't run
+    // animation frames, which the switch waits for.
+    if (spaceUuid) {
+      try {
+        await this.#changeSpaceWithoutAnimation(aWindow, spaceUuid);
+      } catch (e) {
+        console.error(e);
       }
     }
     const [x, y, width, height] = String(aFrame ?? "")
@@ -613,6 +634,7 @@ class nsZenXProfileSpaces {
       aWindow.moveTo(x, y);
     }
     aWindow.focus();
+    const slideIn = slide ? this.#slideSpace(aWindow, slide, 0) : null;
     if (fade) {
       try {
         await this.#fadeIn(aWindow);
@@ -621,6 +643,7 @@ class nsZenXProfileSpaces {
       }
       this.#setWindowOpacity(aWindow, 1);
     }
+    await slideIn;
 
     const from = this.#getProfile(aFromProfileId);
     if (!aFrame || !from || from.id === this.currentProfileId) {
@@ -635,10 +658,85 @@ class nsZenXProfileSpaces {
     }
   }
 
+  async #changeSpaceWithoutAnimation(aWindow, aSpaceUuid) {
+    const spaces = aWindow.gZenWorkspaces;
+    await spaces.promiseInitialized;
+    const space = spaces.resolveWorkspaceFromCLIString(aSpaceUuid);
+    if (!space || space.uuid === spaces.activeWorkspace) {
+      return;
+    }
+    // Zen doesn't animate a switch while one is animating; it clears this
+    // when the switch is done.
+    spaces._animatingChange = true;
+    await spaces.changeWorkspace(space);
+  }
+
+  /**
+   * Zen's space switch animation across two windows: the window switching
+   * away slides its space out (aDirection 1: to the left), the one taking its
+   * place slides its space in (from the right).
+   *
+   * @param {Window} aWindow
+   * @param {number} aDirection 1 or -1, see ZenXProfileSpacesUI
+   * @param {number} aTo 0 to slide in, otherwise where to slide out to
+   *   (-aDirection)
+   */
+  async #slideSpace(aWindow, aDirection, aTo) {
+    const spaces = aWindow.gZenWorkspaces;
+    const element = spaces?.workspaceElement(spaces.activeWorkspace);
+    if (!element || aWindow.gReduceMotion) {
+      return;
+    }
+    const from = aTo ? 0 : aDirection * 100;
+    try {
+      await aWindow.gZenUIManager.motion.animate(
+        element,
+        { transform: [`translateX(${from}%)`, `translateX(${aTo * 100}%)`] },
+        {
+          type: "spring",
+          bounce: 0,
+          duration:
+            Services.prefs.getIntPref(
+              "zen.workspaces.switch-animation-duration",
+              250
+            ) / 1000,
+        }
+      );
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  /** Resolves when hideWindows() runs. */
+  #whenHidden = null;
+
+  async #slideOut(aWindow, aDirection) {
+    const hidden = Promise.withResolvers();
+    this.#whenHidden = hidden;
+    await this.#slideSpace(aWindow, aDirection, -aDirection);
+    // Out of sight until the other window covers this one, back in place
+    // once it's hidden (or if that never happens).
+    await Promise.race([
+      hidden.promise,
+      new Promise(resolve => lazy.setTimeout(resolve, SLIDE_OUT_WAIT_MS)),
+    ]);
+    if (this.#whenHidden === hidden) {
+      this.#whenHidden = null;
+    }
+    const spaces = aWindow.gZenWorkspaces;
+    if (!aWindow.closed && spaces) {
+      spaces._organizeWorkspaceStripLocations(
+        spaces.getActiveWorkspaceFromCache(),
+        true
+      );
+    }
+  }
+
   /** Another profile's window took this profile's place: hide our windows. */
   hideWindows() {
     // Whoever we had hidden is shown again by the profile now in front.
     this.#hiddenPeerId = null;
+    this.#whenHidden?.resolve();
     for (const win of lazy.BrowserWindowTracker.orderedWindows) {
       if (!win.closed) {
         this.#setWindowVisible(win, false);
@@ -722,8 +820,15 @@ class nsZenXProfileSpaces {
    * @param {string} aSpaceUuid
    * @param {?Window} [aWindow] the window the switch is made from; the other
    *   profile's window takes its place and hides it
+   * @param {number} [aSlideDirection] 1 or -1 to slide like Zen's own space
+   *   switch (see ZenXProfileSpacesUI), 0 not to
    */
-  async openRemoteSpace(aProfileId, aSpaceUuid, aWindow = null) {
+  async openRemoteSpace(
+    aProfileId,
+    aSpaceUuid,
+    aWindow = null,
+    aSlideDirection = 0
+  ) {
     const profile = this.#getProfile(aProfileId);
     if (!profile) {
       return;
@@ -741,8 +846,17 @@ class nsZenXProfileSpaces {
         `${this.currentProfileId}`
       );
     }
+    const slide = frame && aSlideDirection ? aSlideDirection : 0;
     try {
-      this.#sps.sendCommandLine(profile.path, args, true);
+      this.#sps.sendCommandLine(
+        profile.path,
+        // Not "-1": a value starting with "-" would be taken for a flag.
+        slide ? [...args, "--zenx-slide", slide > 0 ? "right" : "left"] : args,
+        true
+      );
+      if (slide) {
+        this.#slideOut(aWindow, slide).catch(console.error);
+      }
       return;
     } catch (e) {
       // Expected when no instance is running with that profile.

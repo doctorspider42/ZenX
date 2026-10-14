@@ -1131,13 +1131,32 @@ def switch_to_other_profile(env):
     import_arc(a, "Profile 1", timeout_ms=120000)
     b = env.connect_launched(a)
     b.js("await Z.ready();")
-    a.js(
+    target = a.js(
         """
         const win = await Z.ready();
         const button = await Z.until(() => win.document.querySelector("#zen-workspaces-button .zenx-remote-space"), "a space of B in A's switcher", 20000);
         button.doCommand();
         await Z.until(() => win.document.documentElement.hasAttribute("zenx-hidden"), "A hidden", 15000);
+        return button.getAttribute("zenx-space-id");
         """
+    )
+    # The space slides out of A and into B; both end up in place.
+    placed = """
+        const win = Z.win();
+        const ws = win.gZenWorkspaces;
+        await Z.until(() => ws.workspaceElement(ws.activeWorkspace)?.style.transform === "translateX(0%)", "space in place", 5000).catch(() => {});
+        return { active: ws.activeWorkspace, transform: ws.workspaceElement(ws.activeWorkspace)?.style.transform };
+    """
+    b_state = b.js(placed)
+    check(b_state["active"] == target, "B is on the space picked in A")
+    check(
+        b_state["transform"] == "translateX(0%)",
+        f"B's space slid into place: {b_state['transform']}",
+    )
+    a_state = a.js(placed)
+    check(
+        a_state["transform"] == "translateX(0%)",
+        f"A's space is back in place behind B: {a_state['transform']}",
     )
     return a, b
 

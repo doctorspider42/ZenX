@@ -369,13 +369,46 @@ class nsZenXProfileSpacesUI {
     }
   }
 
+  /**
+   * Which way the switch to a space in the switcher slides, as Zen's own
+   * switches do: 1 when it comes in from the right, -1 from the left.
+   *
+   * @param {Element} aButton
+   */
+  #slideDirection(aButton) {
+    const buttons = [...aButton.parentNode.children].filter(
+      button =>
+        button.hasAttribute("zen-workspace-id") ||
+        button.classList.contains("zenx-remote-space")
+    );
+    const from = buttons.findIndex(
+      button =>
+        button.getAttribute("zen-workspace-id") ===
+        gZenWorkspaces.activeWorkspace
+    );
+    const to = buttons.indexOf(aButton);
+    if (from === -1 || to === -1) {
+      return 1;
+    }
+    // The shorter way round, like Zen.
+    let diff = to - from;
+    const half = Math.floor(buttons.length / 2);
+    if (diff > half) {
+      diff -= buttons.length;
+    } else if (diff < -half) {
+      diff += buttons.length;
+    }
+    return diff < 0 ? -1 : 1;
+  }
+
   async #onCommand(event) {
     const target = event.currentTarget;
     if (target.classList.contains("zenx-remote-space")) {
       await ZenXProfileSpaces.openRemoteSpace(
         parseInt(target.getAttribute("zenx-profile-id")),
         target.getAttribute("zenx-space-id"),
-        window
+        window,
+        this.#slideDirection(target)
       );
       return;
     }
