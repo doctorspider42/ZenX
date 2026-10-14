@@ -877,8 +877,10 @@ def scenario_import_from_welcome(env):
     spaces must arrive once the welcome screen is done.
     """
     inst = env.launch()
-    res = welcome_import_debug(inst, lambda: inst.js(
-        """
+    res = welcome_import_debug(
+        inst,
+        lambda: inst.js(
+            """
         const win = await Z.ready();
         // Headless runs skip Zen's welcome screen; put the window in its state.
         win.document.documentElement.setAttribute("zen-welcome-stage", "true");
@@ -923,7 +925,8 @@ def scenario_import_from_welcome(env):
         await Z.until(() => !win.gZenWorkspaces.isChangingWorkspace, "space switch to settle", 10000);
         return { finished, message, during, afterDialog };
         """
-    ))
+        ),
+    )
     print(f"    {res}")
     check(res["finished"], "the wizard finishes during the welcome screen")
     check(
@@ -1002,7 +1005,10 @@ def scenario_import_all_arc_profiles(env):
         f"all Arc profiles are offered first: {res['first']!r} {res['firstName']!r}",
     )
     check_arc_spaces(env, a.js("return Z.spaces();"), "all profiles, current")
-    check(a.js("return Z.essentials();") == 1, "all profiles: favorite became an essential")
+    check(
+        a.js("return Z.essentials();") == 1,
+        "all profiles: favorite became an essential",
+    )
     b = env.connect_launched(a)
     b_spaces = b.js("await Z.ready(); return Z.spaces();")
     check(
@@ -1021,8 +1027,14 @@ def scenario_import_all_arc_profiles(env):
         "const want = args[0]; return await Z.until(() => { const s = Z.switcher(); return s.length === want && s; }, 'all spaces in the switcher', 20000).catch(() => Z.switcher());",
         len(want),
     )
-    check(sorted(a_switcher) == want, f"all profiles: current window lists every space: {a_switcher}")
-    check(sorted(b_switcher) == want, f"all profiles: Arc Fun's window lists every space: {b_switcher}")
+    check(
+        sorted(a_switcher) == want,
+        f"all profiles: current window lists every space: {a_switcher}",
+    )
+    check(
+        sorted(b_switcher) == want,
+        f"all profiles: Arc Fun's window lists every space: {b_switcher}",
+    )
     check(a_switcher == b_switcher, "all profiles: both windows show one order")
     total = sum(s["pinned"] + s["normal"] for s in env.expected_arc.values()) + 1 + 2
     check(
@@ -1256,7 +1268,9 @@ def scenario_new_profile_and_switching(env):
     )
     check(a_hidden, "A's window is hidden behind it")
     check(
-        not b.js("return Z.win().document.documentElement.hasAttribute('zenx-hidden');"),
+        not b.js(
+            "return Z.win().document.documentElement.hasAttribute('zenx-hidden');"
+        ),
         "B's window is shown",
     )
 
