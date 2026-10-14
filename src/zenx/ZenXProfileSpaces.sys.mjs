@@ -24,6 +24,8 @@
  *   it remove its copy, so a space is never lost when the target never runs.
  */
 
+import { AppConstants } from "resource://gre/modules/AppConstants.sys.mjs";
+
 const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
@@ -64,6 +66,8 @@ const IMPORT_RESULT_PREFIX = `${PREF_BRANCH}import-result.`;
 const IMPORT_TIMEOUT_MS = 10 * 60 * 1000;
 
 const FORMAT_VERSION = 1;
+// Fade-in of a profile's window over the one it replaces.
+const WINDOW_FADE_MS = 160;
 const PUBLISH_DELAY_MS = 500;
 const MAX_IMPORTED_HANDOFFS = 50;
 // Tabs whose URL cannot be reopened in another profile.
@@ -476,7 +480,9 @@ class nsZenXProfileSpaces {
       return;
     }
     Services.prefs.clearUserPref(PENDING_WINDOW_PLACE_PREF);
-    this.takeWindowPlace(aWindow, pending.frame, pending.from);
+    this.takeWindowPlace(aWindow, pending.frame, pending.from).catch(
+      console.error
+    );
   }
 
   /**
@@ -497,6 +503,47 @@ class nsZenXProfileSpaces {
     ]
       .map(Math.round)
       .join(",");
+  }
+
+  /** macOS Dock support with ZenX's hooks (nsIMacDockSupport patch). */
+  get #dock() {
+    if (AppConstants.platform !== "macosx") {
+      return null;
+    }
+    const dock = Cc["@mozilla.org/widget/macdocksupport;1"]?.getService(
+      Ci.nsIMacDockSupport
+    );
+    return typeof dock?.zenxSetWindowOpacity === "function" ? dock : null;
+  }
+
+  #setWindowOpacity(aWindow, aOpacity) {
+    try {
+      this.#dock?.zenxSetWindowOpacity(aWindow, aOpacity);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async #fadeIn(aWindow) {
+    // Painted at least once before it becomes visible.
+    await new Promise(resolve =>
+      aWindow.requestAnimationFrame(() =>
+        aWindow.requestAnimationFrame(resolve)
+      )
+    );
+    const start = ChromeUtils.now();
+    await new Promise(resolve => {
+      const step = () => {
+        const t = Math.min(1, (ChromeUtils.now() - start) / WINDOW_FADE_MS);
+        this.#setWindowOpacity(aWindow, 1 - (1 - t) ** 3);
+        if (t < 1 && !aWindow.closed) {
+          aWindow.requestAnimationFrame(step);
+        } else {
+          resolve();
+        }
+      };
+      aWindow.requestAnimationFrame(step);
+    });
   }
 
   #setWindowVisible(aWindow, aVisible) {
@@ -520,7 +567,11 @@ class nsZenXProfileSpaces {
    * @param {?string} aFrame see windowFrame()
    * @param {?number} aFromProfileId profile whose window to hide
    */
-  takeWindowPlace(aWindow, aFrame, aFromProfileId) {
+  async takeWindowPlace(aWindow, aFrame, aFromProfileId) {
+    const fade = !!aFrame && !!this.#dock;
+    if (fade) {
+      this.#setWindowOpacity(aWindow, 0);
+    }
     // Shown first: a hidden window ignores moves and resizes.
     for (const win of lazy.BrowserWindowTracker.orderedWindows) {
       if (win.document.documentElement.hasAttribute("zenx-hidden")) {
@@ -542,6 +593,14 @@ class nsZenXProfileSpaces {
       aWindow.moveTo(x, y);
     }
     aWindow.focus();
+    if (fade) {
+      try {
+        await this.#fadeIn(aWindow);
+      } catch (e) {
+        console.error(e);
+      }
+      this.#setWindowOpacity(aWindow, 1);
+    }
 
     const from = this.#getProfile(aFromProfileId);
     if (!aFrame || !from || from.id === this.currentProfileId) {
@@ -564,6 +623,12 @@ class nsZenXProfileSpaces {
       if (!win.closed) {
         this.#setWindowVisible(win, false);
       }
+    }
+    // One ZenX in the Dock and the app switcher: the profile in front.
+    try {
+      this.#dock?.zenxHideFromDock();
+    } catch (e) {
+      console.error(e);
     }
   }
 

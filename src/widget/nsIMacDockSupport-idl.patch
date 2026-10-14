@@ -1,0 +1,32 @@
+diff --git a/widget/nsIMacDockSupport.idl b/widget/nsIMacDockSupport.idl
+index c7edfb58819aa9ae2b5941028fea6befc620a91d..a25ab24cef2477b848fc783a6dc568a1b8cb5e2e 100644
+--- a/widget/nsIMacDockSupport.idl
++++ b/widget/nsIMacDockSupport.idl
+@@ -8,6 +8,7 @@ interface nsIStandaloneNativeMenu;
+ interface nsISVGPaintContext;
+ interface imgIContainer;
+ interface nsIFile;
++interface mozIDOMWindowProxy;
+ 
+ [scriptable, uuid(2cbde069-b80d-4e63-b7c7-c4dfe4617028)]
+ interface nsIAppBundleLaunchOptions : nsISupports {
+@@ -44,6 +45,19 @@ interface nsIMacDockSupport : nsISupports
+    */
+   void activateApplication(in boolean aIgnoreOtherApplications);
+ 
++  /**
++   * ZenX: take this process out of the Dock and the app switcher while its
++   * windows are hidden behind another profile's window. Showing a window
++   * brings it back.
++   */
++  void zenxHideFromDock();
++
++  /**
++   * ZenX: opacity of a top-level window (0 to 1), to fade between the
++   * windows of two profiles.
++   */
++  void zenxSetWindowOpacity(in mozIDOMWindowProxy aWindow, in float aOpacity);
++
+   /**
+    * Text used to badge the dock tile. Setting this will remove any badge image.
+    */

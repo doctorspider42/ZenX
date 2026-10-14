@@ -1,0 +1,44 @@
+diff --git a/widget/cocoa/nsMacDockSupport.mm b/widget/cocoa/nsMacDockSupport.mm
+index 889997a24fe65fbd45e28770d0fba6f1651c0c94..4e172deccc6066bacd28c35ecb55c9595db5755c 100644
+--- a/widget/cocoa/nsMacDockSupport.mm
++++ b/widget/cocoa/nsMacDockSupport.mm
+@@ -15,6 +15,8 @@
+ #include "nsIFile.h"
+ #include "nsISVGPaintContext.h"
+ #include "nsMacDockSupport.h"
++#include "nsPIDOMWindow.h"  // ZenX
++#include "WidgetUtils.h"    // ZenX
+ #include "nsNativeThemeColors.h"
+ #include "nsObjCExceptions.h"
+ #include "nsString.h"
+@@ -122,6 +124,30 @@ nsMacDockSupport::ActivateApplication(bool aIgnoreOtherApplications) {
+   NS_OBJC_END_TRY_BLOCK_RETURN(NS_ERROR_FAILURE);
+ }
+ 
++// ZenX
++NS_IMETHODIMP
++nsMacDockSupport::ZenxHideFromDock() {
++  NS_OBJC_BEGIN_TRY_BLOCK_RETURN;
++
++  [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
++  return NS_OK;
++
++  NS_OBJC_END_TRY_BLOCK_RETURN(NS_ERROR_FAILURE);
++}
++
++// ZenX
++NS_IMETHODIMP
++nsMacDockSupport::ZenxSetWindowOpacity(mozIDOMWindowProxy* aWindow,
++                                       float aOpacity) {
++  NS_ENSURE_ARG(aWindow);
++  nsCOMPtr<nsPIDOMWindowOuter> window = nsPIDOMWindowOuter::From(aWindow);
++  nsCOMPtr<nsIWidget> widget =
++      mozilla::widget::WidgetUtils::DOMWindowToWidget(window);
++  NS_ENSURE_TRUE(widget, NS_ERROR_FAILURE);
++  widget->SetWindowOpacity(std::clamp(aOpacity, 0.0f, 1.0f));
++  return NS_OK;
++}
++
+ NS_IMETHODIMP
+ nsMacDockSupport::SetBadgeText(const nsAString& aBadgeText) {
+   NS_OBJC_BEGIN_TRY_BLOCK_RETURN;

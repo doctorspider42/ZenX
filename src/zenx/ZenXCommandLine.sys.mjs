@@ -80,7 +80,9 @@ export class ZenXCommandLineHandler {
         .changeWorkspaceFromCommandLine(uuid)
         .catch(console.error);
     }
-    lazy.ZenXProfileSpaces.takeWindowPlace(win, frame, fromProfileId);
+    lazy.ZenXProfileSpaces.takeWindowPlace(win, frame, fromProfileId).catch(
+      console.error
+    );
   }
 
   get helpInfo() {
