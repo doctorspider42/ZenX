@@ -222,8 +222,16 @@ class nsZenXProfileSpaces {
       return;
     }
     this.#startHidden = false;
-    // Before the window is loaded this only keeps it from being shown, so
-    // it never appears, and no Dock icon either (MOZ_APP_NO_DOCK).
+    // Firefox shows the window again on its own while it starts up (from
+    // native code, after it is loaded), so it is kept hidden until a switch
+    // shows it, and transparent meanwhile so it never flashes. No Dock icon
+    // either (MOZ_APP_NO_DOCK).
+    this.#keptHidden.add(aWindow);
+    if (!this.#keepingHidden) {
+      this.#keepingHidden = true;
+      Services.obs.addObserver(this, "xul-window-visible");
+    }
+    this.#setWindowOpacity(aWindow, 0);
     this.#setWindowVisible(aWindow, false);
     // Firefox finishes starting a window (session, extensions…) once it has
     // painted, which a hidden window never does.
@@ -233,6 +241,33 @@ class nsZenXProfileSpaces {
         aWindow.setTimeout(() => aWindow.gBrowserInit._boundDelayedStartup?.()),
       { once: true }
     );
+  }
+
+  /** Windows that stay hidden whatever Firefox does, see prepareWindow(). */
+  #keptHidden = new WeakSet();
+  #keepingHidden = false;
+  /** Set while this module itself shows or hides a window. */
+  #changingVisibility = false;
+
+  #onWindowVisible(aAppWindow) {
+    if (this.#changingVisibility) {
+      return;
+    }
+    let win;
+    try {
+      win = aAppWindow.QueryInterface(Ci.nsIAppWindow).docShell?.domWindow;
+    } catch (e) {
+      return;
+    }
+    if (win && this.#keptHidden.has(win) && !win.closed) {
+      // Not from inside Firefox's own SetVisibility, which ignores nested
+      // calls.
+      Services.tm.dispatchToMainThread(() => {
+        if (this.#keptHidden.has(win) && !win.closed) {
+          this.#setWindowVisible(win, false);
+        }
+      });
+    }
   }
 
   #schedulePreload() {
@@ -372,6 +407,9 @@ class nsZenXProfileSpaces {
           this.#onRegistryChanged();
           this.processIncomingHandoffs();
         });
+        break;
+      case "xul-window-visible":
+        this.#onWindowVisible(aSubject);
         break;
       case "quit-application-granted":
         this.#publishTask?.finalize();
@@ -707,8 +745,18 @@ class nsZenXProfileSpaces {
   }
 
   #setWindowVisible(aWindow, aVisible) {
-    aWindow.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow).visibility =
-      aVisible;
+    if (aVisible) {
+      // A switch shows it: no longer kept hidden (takeWindowPlace makes it
+      // opaque again).
+      this.#keptHidden.delete(aWindow);
+    }
+    this.#changingVisibility = true;
+    try {
+      aWindow.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow).visibility =
+        aVisible;
+    } finally {
+      this.#changingVisibility = false;
+    }
     aWindow.document.documentElement.toggleAttribute("zenx-hidden", !aVisible);
   }
 
@@ -746,6 +794,10 @@ class nsZenXProfileSpaces {
     for (const win of lazy.BrowserWindowTracker.orderedWindows) {
       if (win.document.documentElement.hasAttribute("zenx-hidden")) {
         this.#setWindowVisible(win, true);
+        if (win !== aWindow || !fade) {
+          // A preloaded window was kept transparent.
+          this.#setWindowOpacity(win, 1);
+        }
       }
     }
     // Shown first too: a window that has never been shown doesn't run
