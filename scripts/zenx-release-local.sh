@@ -93,11 +93,13 @@ if [ ! -d engine/.git ]; then
 fi
 
 step "Patches"
-# Undo zenx-ci-prepare.sh from a previous release so Zen's patches re-apply.
-git -C engine checkout -q HEAD -- \
-  build/moz.configure/update-programs.configure \
-  security/mac/hardenedruntime/production/firefox.browser.xml \
-  tools/signing/macos/mach_commands.py
+# Back to plain Firefox so the patches apply again (the previous release left
+# them, and zenx-ci-prepare.sh's changes, in the tree). Unlike `surfer reset`
+# this keeps ignored files: the build in obj-*/ stays and builds are
+# incremental.
+git -C engine reset -q
+git -C engine checkout -q -- .
+git -C engine clean -fdq
 npm run surfer -- ci --brand release --display-version "$VERSION"
 npm run import
 bash scripts/zenx-ci-prepare.sh
