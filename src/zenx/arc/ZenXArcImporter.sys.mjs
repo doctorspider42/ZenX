@@ -14,6 +14,7 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+  setTimeout: "resource://gre/modules/Timer.sys.mjs",
 });
 
 /** Path of Arc's sidebar file, next to its Chromium "User Data" folder. */
@@ -52,7 +53,42 @@ export async function readArcSidebar(
   return parseArcSidebar(await IOUtils.readJSON(path), { profileDirectory });
 }
 
-function getSpacesWindow() {
+const MIGRATION_DIALOG_URL =
+  "chrome://browser/content/migration/migration-dialog-window.html";
+
+/**
+ * The window can't take an import while Zen's welcome screen runs (it
+ * rearranges tabs when it finishes) or while the import wizard is open as a
+ * modal window over it (the space switch animations the import waits for
+ * don't run).
+ *
+ * @param {Window} aWindow
+ */
+export function isWindowBusy(aWindow) {
+  if (aWindow.document.documentElement.hasAttribute("zen-welcome-stage")) {
+    return true;
+  }
+  for (const win of Services.wm.getEnumerator(null)) {
+    if (win.location?.href === MIGRATION_DIALOG_URL && !win.closed) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Resolves once isWindowBusy() is false.
+ *
+ * @param {Window} aWindow
+ */
+export async function whenWindowFree(aWindow) {
+  while (isWindowBusy(aWindow)) {
+    await new Promise(resolve => lazy.setTimeout(resolve, 500));
+  }
+}
+
+/** The window Arc is imported into. */
+export function getArcImportWindow() {
   const win = lazy.BrowserWindowTracker.getTopWindow({ private: false });
   if (!win?.gZenWorkspaces || win.gZenWorkspaces.privateWindowOrDisabled) {
     throw new Error("No browser window with spaces to import Arc into");
@@ -70,7 +106,7 @@ function getSpacesWindow() {
  */
 export async function importArcIntoWindow(
   aParsed,
-  aWindow = getSpacesWindow()
+  aWindow = getArcImportWindow()
 ) {
   const { gZenWorkspaces, gZenShareManager, gZenPinnedTabManager, gBrowser } =
     aWindow;

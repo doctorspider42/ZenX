@@ -22,10 +22,14 @@
 import { ChromeProfileMigrator } from "resource:///modules/ChromeProfileMigrator.sys.mjs";
 import { MigrationUtils } from "resource:///modules/MigrationUtils.sys.mjs";
 import {
+  getArcImportWindow,
   getArcUserDataPath,
   importArcIntoWindow,
+  isWindowBusy,
   readArcSidebar,
+  whenWindowFree,
 } from "resource:///modules/zenx/arc/ZenXArcImporter.sys.mjs";
+import { summarizeArcImport } from "resource:///modules/zenx/arc/ZenXArcSidebar.sys.mjs";
 
 const lazy = {};
 
@@ -171,7 +175,24 @@ export class ArcProfileMigrator extends ChromeProfileMigrator {
         type: MigrationUtils.resourceTypes.BOOKMARKS,
         async migrate(aCallback) {
           try {
-            const { tabs, essentials } = await importArcIntoWindow(sidebar);
+            const win = getArcImportWindow();
+            if (isWindowBusy(win)) {
+              // From Zen's welcome screen: the spaces are created once it is
+              // done, the wizard reports what will come.
+              const { pinnedTabs, tabs, essentials } =
+                summarizeArcImport(sidebar);
+              MigrationUtils._importQuantities.bookmarks +=
+                pinnedTabs + tabs + essentials;
+              whenWindowFree(win)
+                .then(() => importArcIntoWindow(sidebar, win))
+                .catch(e => console.error("ZenX: Arc spaces import failed", e));
+              aCallback(true);
+              return;
+            }
+            const { tabs, essentials } = await importArcIntoWindow(
+              sidebar,
+              win
+            );
             MigrationUtils._importQuantities.bookmarks += tabs + essentials;
             aCallback(true);
           } catch (e) {

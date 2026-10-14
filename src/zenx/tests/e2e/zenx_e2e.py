@@ -277,7 +277,8 @@ def free_port():
 # Chrome-context helpers available to every script as `Z`.
 JS_HELPERS = r"""
 const Z = {
-  sleep: ms => new Promise(r => setTimeout(r, ms)),
+  // System timers: a modal window suspends the browser window's own.
+  sleep: ms => new Promise(r => ChromeUtils.importESModule("resource://gre/modules/Timer.sys.mjs").setTimeout(r, ms)),
   async until(fn, what, timeout = 15000) {
     const start = Date.now();
     for (;;) {
@@ -859,6 +860,84 @@ def scenario_import_with_existing_data(env):
     check(inst.js("return Z.essentials();") == 1, "essential not duplicated")
 
 
+def welcome_import_debug(inst, run):
+    try:
+        return run()
+    except Exception:
+        step = inst.client.execute_script(
+            'return Services.prefs.getStringPref("zenx.e2e.step", "");'
+        )
+        raise Failure(f"stuck after step {step!r}")
+
+
+def scenario_import_from_welcome(env):
+    """
+    Zen's welcome screen opens the import wizard as a modal window over the
+    browser window. The import must finish (it used to spin forever) and the
+    spaces must arrive once the welcome screen is done.
+    """
+    inst = env.launch()
+    res = welcome_import_debug(inst, lambda: inst.js(
+        """
+        const win = await Z.ready();
+        // Headless runs skip Zen's welcome screen; put the window in its state.
+        win.document.documentElement.setAttribute("zen-welcome-stage", "true");
+        const { MigrationUtils } = Z.module("resource:///modules/MigrationUtils.sys.mjs");
+        const url = "chrome://browser/content/migration/migration-dialog-window.html";
+        // A modal window: opening it blocks until it closes.
+        win.setTimeout(() => MigrationUtils.showMigrationWizard(win, { isStartupMigration: true }), 0);
+        Services.prefs.setStringPref("zenx.e2e.step", 'const dialog');
+        const dialog = await Z.until(() => [...Services.wm.getEnumerator(null)].find(w => w.location?.href === url && w.document.readyState === "complete"), "the import wizard window", 20000);
+        Services.prefs.setStringPref("zenx.e2e.step", 'const wizard');
+        const wizard = await Z.until(() => dialog.document.querySelector("migration-wizard"), "the wizard");
+        Services.prefs.setStringPref("zenx.e2e.step", 'const shadow');
+        const shadow = await Z.until(() => wizard.openOrClosedShadowRoot, "the wizard content");
+        Services.prefs.setStringPref("zenx.e2e.step", 'const item');
+        const item = await Z.until(() => [...shadow.querySelectorAll('panel-item[key="arc"]')].find(i => i.profile?.id === "Default"), "Arc in the wizard", 20000);
+        item.click();
+        Services.prefs.setStringPref("zenx.e2e.step", 'const importButton');
+        const importButton = shadow.querySelector("#import");
+        await Z.until(
+          () => !importButton.disabled && shadow.querySelector('#resource-type-list label[data-resource-type="BOOKMARKS"]')?.hidden === false,
+          "the wizard ready to import from Arc", 40000);
+        for (const label of shadow.querySelectorAll("#resource-type-list label[data-resource-type]")) {
+          label.control.checked = label.dataset.resourceType === "BOOKMARKS";
+        }
+        Services.prefs.setStringPref("zenx.e2e.step", 'const done');
+        const done = new Promise(r => wizard.addEventListener("MigrationWizard:DoneMigration", r, { once: true }));
+        importButton.click();
+        Services.prefs.setStringPref("zenx.e2e.step", 'const finished');
+        const finished = await Promise.race([done.then(() => true), Z.sleep(30000).then(() => false)]);
+        await Z.sleep(300);
+        Services.prefs.setStringPref("zenx.e2e.step", 'const message');
+        const message = shadow.querySelector('[data-resource-type="BOOKMARKS"] .message-text')?.textContent ?? "";
+        const during = Z.spaces(win).filter(s => s.arc).length;
+        Services.prefs.setStringPref("zenx.e2e.step", 'dialog.close();');
+        dialog.close();
+        await Z.until(() => dialog.closed, "the wizard to close");
+        await Z.sleep(1500);
+        const afterDialog = Z.spaces(win).filter(s => s.arc).length;
+        Services.prefs.setStringPref("zenx.e2e.step", 'win.document.documentElement.removeAttribute');
+        win.document.documentElement.removeAttribute("zen-welcome-stage");
+        await Z.until(() => Z.spaces(win).filter(s => s.arc).length, "Arc spaces after the welcome screen", 20000);
+        await Z.until(() => !win.gZenWorkspaces.isChangingWorkspace, "space switch to settle", 10000);
+        return { finished, message, during, afterDialog };
+        """
+    ))
+    print(f"    {res}")
+    check(res["finished"], "the wizard finishes during the welcome screen")
+    check(
+        any(ch.isdigit() and ch != "0" for ch in res["message"]),
+        f"the wizard reports what will be imported: {res['message']!r}",
+    )
+    check(
+        res["during"] == 0 and res["afterDialog"] == 0,
+        "nothing changes in the window while the welcome screen runs",
+    )
+    check_arc_spaces(env, inst.js("return Z.spaces();"), "after the welcome screen")
+    check(ui_responsive(inst), "UI responds after importing from the welcome screen")
+
+
 def scenario_import_other_arc_profile(env):
     """
     Arc's second profile ("Arc Fun") goes into a ZenX profile of the same name,
@@ -1241,6 +1320,7 @@ SCENARIOS = [
     scenario_first_run,
     scenario_import_into_empty,
     scenario_import_with_existing_data,
+    scenario_import_from_welcome,
     scenario_import_other_arc_profile,
     scenario_import_all_arc_profiles,
     scenario_new_profile_and_switching,
