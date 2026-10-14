@@ -81,6 +81,15 @@ Code: `src/zenx/ZenXProfileSpaces.sys.mjs` (the per-process service) and `src/ze
 
 Turn the feature off with `zenx.profile-spaces.enabled = false`.
 
+## Installer window
+
+The DMG window (background, icon positions, window size) is ZenX's own, in `build/zenx-dmg/`. Zen's `dsstore` was made for a volume named "Nightly", so on the "ZenX" volume Finder couldn't find its background. The release uses:
+
+- `background.png`: rendered from `background.html` by `scripts/zenx-dmg-art.sh` (2x, 144 dpi).
+- `dsstore`: written by `scripts/zenx-dmg-dsstore.py` (needs the `ds_store` and `mac_alias` Python packages, see the script). It points at `/.background/background.png` on a volume named "ZenX" and puts the icons where the background expects them. The `/Applications` link is named `" "` by `make_dmg`, so the background draws its label.
+
+Change both together: the icon positions are in `background.html` and in the script.
+
 ## Import from Arc
 
 In the spirit of Zen's own importers, **Arc** appears in the import wizard on macOS: in Zen's welcome screen, and in Settings → Import Browser Data. It works like the importers for other Chromium browsers, so history and form data come over the usual way. Logins too, after macOS asks permission to read "Arc Safe Storage" from the Keychain. On top of that, Arc's sidebar becomes Zen:

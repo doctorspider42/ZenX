@@ -137,9 +137,9 @@ step "DMG"
 BRANDING="$TREE/engine/browser/branding/release"
 (cd engine && ./mach python -m mozbuild.action.make_dmg \
   --volume-name "ZenX" \
-  --background "$BRANDING/background.png" \
+  --background "$TREE/build/zenx-dmg/background.png" \
   --icon "$BRANDING/firefox.icns" \
-  --dsstore "$BRANDING/dsstore" \
+  --dsstore "$TREE/build/zenx-dmg/dsstore" \
   "$STAGE" "$OUT/temp.dmg")
 hdiutil convert "$OUT/temp.dmg" -quiet -format UDZO -imagekey zlib-level=9 -o "$DMG"
 rm -f "$OUT/temp.dmg"

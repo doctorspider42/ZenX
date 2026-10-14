@@ -260,9 +260,9 @@ jobs:
           cd engine
           ./mach python -m mozbuild.action.make_dmg \
             --volume-name "ZenX" \
-            --background ./browser/branding/release/background.png \
+            --background ../build/zenx-dmg/background.png \
             --icon ./browser/branding/release/firefox.icns \
-            --dsstore ./browser/branding/release/dsstore \
+            --dsstore ../build/zenx-dmg/dsstore \
             ./obj-aarch64-apple-darwin/dist/ ../zenx-temp.dmg
           cd ..
           DMG="ZenX-$VERSION-macos-arm64.dmg"

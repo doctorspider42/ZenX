@@ -1,0 +1,138 @@
+<!doctype html>
+<!-- ZenX: DMG window background. Rendered to background.png by
+     scripts/zenx-dmg-art.sh; icon positions there must match this layout. -->
+<meta charset="utf-8">
+<style>
+  :root {
+    --app-x: 190px;
+    --apps-x: 490px;
+    --icon-y: 196px;
+  }
+  html, body { margin: 0; }
+  /* Rendered at 2x for Retina (see scripts/zenx-dmg-art.sh). */
+  html { zoom: 2; }
+  body {
+    width: 680px;
+    height: 440px;
+    overflow: hidden;
+    position: relative;
+    font-family: -apple-system, "SF Pro Text", system-ui, sans-serif;
+    background:
+      radial-gradient(circle at var(--app-x) var(--icon-y), rgba(255, 236, 214, 0.16), transparent 210px),
+      radial-gradient(circle at var(--apps-x) var(--icon-y), rgba(140, 170, 255, 0.10), transparent 200px),
+      radial-gradient(120% 90% at 50% 0%, #26252b 0%, #151418 55%, #0d0c0f 100%);
+  }
+  .rings {
+    position: absolute;
+    left: var(--app-x);
+    top: var(--icon-y);
+  }
+  .rings div {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 245, 230, var(--a));
+    width: var(--d);
+    height: var(--d);
+    transform: translate(-50%, -50%);
+  }
+  .grain {
+    position: absolute;
+    inset: 0;
+    opacity: 0.07;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.6 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  }
+  .card {
+    position: absolute;
+    top: calc(var(--icon-y) - 92px);
+    width: 184px;
+    height: 206px;
+    margin-left: -92px;
+    border-radius: 28px;
+    /* Mid-tone so Finder's labels read in light (black) and dark (white) mode. */
+    background: linear-gradient(180deg, rgba(118, 116, 126, 0.78), rgba(98, 96, 106, 0.82));
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+      0 24px 50px rgba(0, 0, 0, 0.45);
+  }
+  .card.app { left: var(--app-x); }
+  .card.apps { left: var(--apps-x); }
+  .arrow {
+    position: absolute;
+    left: calc(var(--app-x) + 108px);
+    width: calc(var(--apps-x) - var(--app-x) - 216px);
+    top: calc(var(--icon-y) - 6px);
+    height: 12px;
+  }
+  .arrow::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 6px;
+    top: 5px;
+    height: 2px;
+    border-radius: 1px;
+    background: linear-gradient(90deg, rgba(255, 240, 220, 0), rgba(255, 240, 220, 0.9));
+  }
+  .arrow::after {
+    content: "";
+    position: absolute;
+    right: 1px;
+    top: 1px;
+    width: 8px;
+    height: 8px;
+    border-top: 2px solid rgba(255, 240, 220, 0.9);
+    border-right: 2px solid rgba(255, 240, 220, 0.9);
+    border-radius: 1px;
+    transform: rotate(45deg);
+  }
+  .label {
+    position: absolute;
+    top: calc(var(--icon-y) + 72px);
+    width: 160px;
+    margin-left: -80px;
+    text-align: center;
+    color: #fff;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .caption {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 58px;
+    text-align: center;
+    color: rgba(255, 245, 235, 0.62);
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+  }
+  .caption b { color: rgba(255, 248, 240, 0.92); font-weight: 600; }
+  .brand {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 34px;
+    text-align: center;
+    color: rgba(255, 245, 235, 0.28);
+    font-size: 11px;
+    letter-spacing: 2.5px;
+    text-transform: uppercase;
+  }
+</style>
+<div class="rings">
+  <div style="--d: 300px; --a: 0.10"></div>
+  <div style="--d: 420px; --a: 0.075"></div>
+  <div style="--d: 560px; --a: 0.055"></div>
+  <div style="--d: 720px; --a: 0.04"></div>
+  <div style="--d: 900px; --a: 0.03"></div>
+  <div style="--d: 1100px; --a: 0.02"></div>
+</div>
+<div class="grain"></div>
+<div class="card app"></div>
+<div class="card apps"></div>
+<div class="arrow"></div>
+<!-- Finder shows no label for make_dmg's " " link to /Applications. -->
+<div class="label" style="left: var(--apps-x)">Applications</div>
+<div class="caption">Drag <b>ZenX</b> into Applications</div>
+<div class="brand">Zen, with Arc's best ideas</div>
