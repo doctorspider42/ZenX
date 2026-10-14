@@ -32,6 +32,8 @@ class nsZenXProfileSpacesUI {
   #moveMenu = null;
 
   async init() {
+    // Before the window is shown.
+    ZenXProfileSpaces.prepareWindow(window);
     await gZenWorkspaces.promiseInitialized;
     if (gZenWorkspaces.privateWindowOrDisabled) {
       return;

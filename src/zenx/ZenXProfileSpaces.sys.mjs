@@ -59,6 +59,9 @@ export const OPEN_PROFILE_EDITOR_PREF = `${PREF_BRANCH}open-profile-editor`;
 const FRESH_PROFILE_PREF = `${PREF_BRANCH}fresh-profile`;
 // Local: the window of another profile the first window takes the place of.
 const PENDING_WINDOW_PLACE_PREF = `${PREF_BRANCH}pending-window-place`;
+const PRELOAD_PREF = `${PREF_BRANCH}preload`;
+// After startup, so the profile in front gets going first.
+const PRELOAD_DELAY_MS = 5000;
 // Shared: what an import run in another profile brought in, read by the
 // profile that asked for it. `<prefix><handoffId>`.
 const IMPORT_RESULT_PREFIX = `${PREF_BRANCH}import-result.`;
@@ -166,8 +169,134 @@ class nsZenXProfileSpaces {
     await this.#refreshProfiles();
     if (this.active) {
       await this.disableStartupProfileSelector();
+      if (this.#preloadedBy !== null) {
+        // Firefox makes every profile the default one when it starts; the
+        // next start must still open the profile in front.
+        const front = this.#getProfile(this.#preloadedBy);
+        if (front) {
+          await this.#sps.setDefaultProfileForGroup(front);
+        }
+      } else {
+        this.#schedulePreload();
+      }
     }
     this.#notifyListeners();
+  }
+
+  // Mark: preloading
+
+  /** Profile that started this one in the background (`--zenx-preload`). */
+  #preloadedBy = null;
+
+  /** This profile's first window stays hidden, see startInBackground(). */
+  #startHidden = false;
+
+  /**
+   * This profile was started in the background by the profile in front
+   * (`--zenx-preload <id>`), to be ready when one of its spaces is picked.
+   * It runs without a window on screen or a Dock icon until then.
+   *
+   * @param {number} aFromProfileId
+   */
+  startInBackground(aFromProfileId) {
+    this.#preloadedBy = aFromProfileId;
+    this.#startHidden = true;
+  }
+
+  /**
+   * Called by every browser window as it loads, before it is shown.
+   *
+   * @param {Window} aWindow
+   */
+  prepareWindow(aWindow) {
+    if (!this.#startHidden) {
+      return;
+    }
+    this.#startHidden = false;
+    // Before the window is loaded this only keeps it from being shown, so
+    // it never appears, and no Dock icon either (MOZ_APP_NO_DOCK).
+    this.#setWindowVisible(aWindow, false);
+    // Firefox finishes starting a window (session, extensions…) once it has
+    // painted, which a hidden window never does.
+    aWindow.addEventListener(
+      "load",
+      () =>
+        aWindow.setTimeout(() => aWindow.gBrowserInit._boundDelayedStartup?.()),
+      { once: true }
+    );
+  }
+
+  #schedulePreload() {
+    lazy.setTimeout(
+      () =>
+        Services.tm.idleDispatchToMainThread(() =>
+          this.#preloadProfiles().catch(console.error)
+        ),
+      PRELOAD_DELAY_MS
+    );
+  }
+
+  /** Starts the other profiles of the group that aren't running. */
+  async #preloadProfiles() {
+    if (
+      Services.startup.shuttingDown ||
+      !Services.prefs.getBoolPref(PRELOAD_PREF, true)
+    ) {
+      return;
+    }
+    await this.#refreshProfiles();
+    for (const profile of this.#profiles) {
+      if (profile.id === this.currentProfileId || this.#isRunning(profile)) {
+        continue;
+      }
+      try {
+        this.#startInBackground([
+          "--profile",
+          profile.path,
+          "--zenx-preload",
+          `${this.currentProfileId}`,
+        ]);
+      } catch (e) {
+        console.error(`ZenX: could not preload profile ${profile.id}`, e);
+      }
+    }
+  }
+
+  /**
+   * Starts a process without a Dock icon (MOZ_APP_NO_DOCK) that doesn't
+   * take the focus. Firefox's own execProcess goes through LaunchServices on
+   * macOS, which activates the new process and doesn't pass the environment.
+   *
+   * @param {Array<string>} aArgs
+   */
+  #startInBackground(aArgs) {
+    const noDock = Services.env.get("MOZ_APP_NO_DOCK");
+    Services.env.set("MOZ_APP_NO_DOCK", "1");
+    try {
+      if (Object.hasOwn(this.#sps, "execProcess")) {
+        // Replaced for a separate profile root (#useAppIniForLaunches) or by
+        // tests; both start the process with nsIProcess too.
+        this.#sps.execProcess(aArgs);
+        return;
+      }
+      const process = Cc["@mozilla.org/process/util;1"].createInstance(
+        Ci.nsIProcess
+      );
+      process.init(Services.dirsvc.get("XREExeF", Ci.nsIFile));
+      process.runw(false, aArgs, aArgs.length);
+    } finally {
+      Services.env.set("MOZ_APP_NO_DOCK", noDock);
+    }
+  }
+
+  #isRunning(aProfile) {
+    try {
+      // Handled by ZenXCommandLine without doing anything.
+      this.#sps.sendCommandLine(aProfile.path, ["--zenx-ping"], false);
+      return true;
+    } catch (e) {
+      return false;
+    }
   }
 
   /**

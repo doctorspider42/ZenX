@@ -11,7 +11,8 @@
  * finishing the slide the other window started.
  * `--zenx-show` brings back a hidden window when the one in front restarts,
  * and `--zenx-quit` quits a profile in the background when the one in front
- * quits.
+ * quits. `--zenx-preload <profile id>` starts a profile in the background,
+ * with its window hidden, and `--zenx-ping` tells whether one is running.
  *
  * It runs before Firefox's and Zen's handlers so that the whole command line
  * is used up. When the profile wasn't reachable directly, the request comes
@@ -34,6 +35,22 @@ export class ZenXCommandLineHandler {
   QueryInterface = ChromeUtils.generateQI(["nsICommandLineHandler"]);
 
   handle(cmdLine) {
+    if (cmdLine.handleFlag("zenx-ping", false)) {
+      cmdLine.preventDefault = true;
+      return;
+    }
+    let preloadedBy = null;
+    try {
+      preloadedBy = cmdLine.handleFlagWithParam("zenx-preload", false);
+    } catch (e) {}
+    if (
+      preloadedBy &&
+      cmdLine.state === Ci.nsICommandLine.STATE_INITIAL_LAUNCH
+    ) {
+      // The window still opens (and restores the session), hidden.
+      lazy.ZenXProfileSpaces.startInBackground(parseInt(preloadedBy));
+      return;
+    }
     if (cmdLine.handleFlag("zenx-quit", false)) {
       cmdLine.preventDefault = true;
       lazy.ZenXProfileSpaces.quitIfInBackground();

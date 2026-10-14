@@ -615,6 +615,9 @@ class Env:
                 time.sleep(0.3)
         instance = Instance(port, process, profile_dir)
         self.instances.append(instance)
+        # Preloaded profiles would start outside the harness (see
+        # install_profile_launcher); scenario_preload_profiles turns it on.
+        instance.js('Services.prefs.setBoolPref("zenx.profile-spaces.preload", false);')
         actual = instance.js('return Services.dirsvc.get("ProfD", Ci.nsIFile).path;')
         if not str(actual).startswith(str(self.app_data)):
             instance.quit()
@@ -1182,6 +1185,82 @@ def scenario_one_quit_for_all(env):
     env.instances.remove(a)
 
 
+def scenario_preload_profiles(env):
+    """
+    The other profiles start in the background after startup, with a hidden
+    window, so switching to their spaces needs no new process. A preloaded
+    profile doesn't become the one the next start opens.
+    """
+    a = env.launch()
+    a.js("await Z.ready();")
+    env.install_profile_launcher(a)
+    import_arc(a, "Profile 1", timeout_ms=120000)
+    b = env.connect_launched(a)
+    b.js("await Z.ready();")
+    b.quit()
+    env.instances.remove(b)
+    a.quit()
+    env.instances.remove(a)
+
+    def start_with_preload():
+        front = env.launch()
+        env.install_profile_launcher(front)
+        front.js('Services.prefs.setBoolPref("zenx.profile-spaces.preload", true);')
+        other = env.connect_launched(front)
+        check(
+            other.profile_dir != front.profile_dir,
+            "the other profile is started in the background",
+        )
+        hidden = other.js(
+            """
+            const win = await Z.ready();
+            return win.document.documentElement.hasAttribute("zenx-hidden");
+            """
+        )
+        check(hidden, "its window stays hidden")
+        return front, other
+
+    front, other = start_with_preload()
+    front_dir = front.profile_dir
+    front.quit()
+    env.instances.remove(front)
+    env.instances.remove(other)
+    other_exited = False
+    for _ in range(60):
+        try:
+            with socket.create_connection(("127.0.0.1", other.port), timeout=0.5):
+                pass
+        except OSError:
+            other_exited = True
+            break
+        time.sleep(0.5)
+    check(other_exited, "the preloaded profile quits with the one in front")
+
+    front, other = start_with_preload()
+    check(
+        front.profile_dir == front_dir,
+        "the next start opens the same profile, not the preloaded one",
+    )
+    front.js(
+        """
+        const win = await Z.ready();
+        const button = await Z.until(() => win.document.querySelector("#zen-workspaces-button .zenx-remote-space"), "a space of the other profile in the switcher", 20000);
+        button.doCommand();
+        await Z.until(() => win.document.documentElement.hasAttribute("zenx-hidden"), "front hidden", 15000);
+        """
+    )
+    shown = other.js(
+        """
+        return await Z.until(() => !Z.win().document.documentElement.hasAttribute("zenx-hidden"), "shown", 10000).catch(() => false);
+        """
+    )
+    check(shown, "switching shows the preloaded profile's window")
+    relaunched = front.js(
+        'return Services.prefs.getStringPref("zenx.e2e.last-launch", "");'
+    )
+    check(not relaunched, "no new process for the switch")
+
+
 def scenario_last_window_closed(env):
     """
     Closing the last window of the profile in front leaves the app without
@@ -1573,6 +1652,7 @@ SCENARIOS = [
     scenario_new_profile_and_switching,
     scenario_one_quit_for_all,
     scenario_last_window_closed,
+    scenario_preload_profiles,
     scenario_delete_profile,
     scenario_restart_with_two_profiles,
 ]
