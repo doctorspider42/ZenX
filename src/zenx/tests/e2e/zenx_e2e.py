@@ -1077,6 +1077,10 @@ def scenario_import_other_arc_profile(env):
     )
     b = env.connect_launched(a)
     b_spaces = b.js("await Z.ready(); return Z.spaces();")
+    check(
+        b.js("return Z.win().document.documentElement.hasAttribute('zenx-hidden');"),
+        "the new profile imports in the background, its window stays hidden",
+    )
     arc_b = [s for s in b_spaces if s["arc"]]
     check(
         [(s["name"], s["icon"], s["pinned"]) for s in arc_b]
@@ -1130,6 +1134,10 @@ def scenario_import_all_arc_profiles(env):
     )
     b = env.connect_launched(a)
     b_spaces = b.js("await Z.ready(); return Z.spaces();")
+    check(
+        b.js("return Z.win().document.documentElement.hasAttribute('zenx-hidden');"),
+        "the new profile imports in the background, its window stays hidden",
+    )
     check(
         [(s["name"], bool(s["arc"]), s["pinned"]) for s in b_spaces]
         == [("Other profile", True, 2)],

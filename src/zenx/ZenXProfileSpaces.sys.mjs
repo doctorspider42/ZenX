@@ -1288,7 +1288,17 @@ class nsZenXProfileSpaces {
       import: aImport,
     };
     this.#setSharedPref(handoffPref, toSharedJSON(handoffs));
-    this.#sps.launchInstance(aProfile);
+    // The import runs in the background: a running profile picks the handoff
+    // up from the shared pref, one that isn't running starts like a preloaded
+    // one, hidden. Firefox's launchInstance would bring its window up.
+    if (!this.#isRunning(aProfile)) {
+      this.#startInBackground([
+        "--profile",
+        aProfile.path,
+        "--zenx-preload",
+        `${this.currentProfileId}`,
+      ]);
+    }
 
     const value = await result;
     this.#setSharedPref(resultPref, null);
@@ -1438,6 +1448,7 @@ class nsZenXProfileSpaces {
 
     const imported = readJSONPref(IMPORTED_HANDOFFS_PREF, []);
     const done = [];
+    let spaceArrived = false;
     for (const id of ids) {
       const handoff = handoffs[id];
       if (
@@ -1463,6 +1474,7 @@ class nsZenXProfileSpaces {
       ) {
         try {
           await this.#importSpace(win, handoff.space, handoff.order);
+          spaceArrived = true;
         } catch (e) {
           console.error("ZenX: could not import space from another profile", e);
           continue;
@@ -1488,7 +1500,14 @@ class nsZenXProfileSpaces {
     // Publish right away, this is what lets the source drop its copy.
     this.#publishTask.disarm();
     this.#publishRegistry();
-    win.focus();
+    // A moved space is shown where it arrived. An import stays in the
+    // background, the profile in front shows the wizard's result.
+    if (
+      spaceArrived &&
+      !win.document.documentElement.hasAttribute("zenx-hidden")
+    ) {
+      win.focus();
+    }
   }
 
   /**
