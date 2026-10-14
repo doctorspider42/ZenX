@@ -7,7 +7,9 @@
  * space. Other profiles send it when one of this profile's spaces is clicked
  * in their switcher, with `--zenx-frame x,y,w,h --zenx-from <profile id>` so
  * this window takes the place of theirs and they hide it (`--zenx-hide`).
- * `--zenx-show` brings back a hidden window when the one in front goes away.
+ * `--zenx-show` brings back a hidden window when the one in front restarts,
+ * and `--zenx-quit` quits a profile in the background when the one in front
+ * quits.
  *
  * It runs before Firefox's and Zen's handlers so that the whole command line
  * is used up. When the profile wasn't reachable directly, the request comes
@@ -30,6 +32,11 @@ export class ZenXCommandLineHandler {
   QueryInterface = ChromeUtils.generateQI(["nsICommandLineHandler"]);
 
   handle(cmdLine) {
+    if (cmdLine.handleFlag("zenx-quit", false)) {
+      cmdLine.preventDefault = true;
+      lazy.ZenXProfileSpaces.quitIfInBackground();
+      return;
+    }
     if (cmdLine.handleFlag("zenx-hide", false)) {
       cmdLine.preventDefault = true;
       lazy.ZenXProfileSpaces.hideWindows();

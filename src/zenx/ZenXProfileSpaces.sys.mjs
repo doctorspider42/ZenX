@@ -148,7 +148,7 @@ class nsZenXProfileSpaces {
     Services.prefs.addObserver(PREF_BRANCH, this);
     Services.obs.addObserver(this, "sps-profiles-updated");
     Services.obs.addObserver(this, "quit-application-granted");
-    Services.ww.registerNotification(this);
+    Services.obs.addObserver(this, "quit-application");
     this.#publishTask = new lazy.DeferredTask(
       () => this.#publishRegistry(),
       PUBLISH_DELAY_MS
@@ -235,15 +235,13 @@ class nsZenXProfileSpaces {
         break;
       case "quit-application-granted":
         this.#publishTask?.finalize();
-        this.#revealHiddenPeer();
         break;
-      case "domwindowclosed":
-        if (
-          aSubject.document?.documentElement?.getAttribute("windowtype") ===
-            "navigator:browser" &&
-          !this.#visibleBrowserWindows().some(win => win !== aSubject)
-        ) {
+      case "quit-application":
+        // Sent once the quit can no longer be cancelled.
+        if (aData === "restart") {
           this.#revealHiddenPeer();
+        } else if (!this.#quitByPeer) {
+          this.#quitBackgroundProfiles();
         }
         break;
     }
@@ -655,8 +653,9 @@ class nsZenXProfileSpaces {
   }
 
   /**
-   * This profile is going away (quit, or its last window closed): bring back
-   * the window it hid, in its place.
+   * This profile restarts: bring back the window it hid, in its place. (On a
+   * quit, that profile quits too. When the last window is closed it stays
+   * hidden, as the app stays open without windows on macOS.)
    */
   #revealHiddenPeer() {
     const peer = this.#getProfile(this.#hiddenPeerId);
@@ -675,6 +674,44 @@ class nsZenXProfileSpaces {
     } catch (e) {
       // It quit too.
     }
+  }
+
+  /** This profile quits because the one in front did (`--zenx-quit`). */
+  #quitByPeer = false;
+
+  /**
+   * Like Arc, ZenX is one app: quitting it quits the profiles in the
+   * background too, the ones whose windows this or an earlier switch hid. A
+   * profile that still shows a window (e.g. a full screen one) keeps running.
+   */
+  #quitBackgroundProfiles() {
+    for (const profile of this.#profiles) {
+      if (profile.id === this.currentProfileId) {
+        continue;
+      }
+      try {
+        this.#sps.sendCommandLine(profile.path, ["--zenx-quit"], false);
+      } catch (e) {
+        // Expected when no instance is running with that profile.
+      }
+    }
+  }
+
+  /**
+   * The profile in front quits (`--zenx-quit`): quit too, unless a window of
+   * this profile is on screen.
+   */
+  quitIfInBackground() {
+    if (this.#visibleBrowserWindows().length) {
+      return;
+    }
+    this.#quitByPeer = true;
+    // Forced: a hidden window can't show a "Quit and close tabs?" prompt.
+    // The session is still saved, as on any quit.
+    // Not from inside the command line handler of the remote call.
+    Services.tm.dispatchToMainThread(() =>
+      Services.startup.quit(Ci.nsIAppStartup.eForceQuit)
+    );
   }
 
   /**

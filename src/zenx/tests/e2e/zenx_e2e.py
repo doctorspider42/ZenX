@@ -1120,11 +1120,10 @@ def scenario_import_all_arc_profiles(env):
     )
 
 
-def scenario_one_window_on_quit(env):
+def switch_to_other_profile(env):
     """
-    Switching to another profile's space hides this profile's window behind
-    it. When the profile in front quits, the hidden window comes back in its
-    place, so there's never no window.
+    A imports an Arc profile into a new profile B, then switches to B's space:
+    B's window takes A's place and A's is hidden. Returns (a, b).
     """
     a = env.launch()
     a.js("await Z.ready();")
@@ -1140,23 +1139,61 @@ def scenario_one_window_on_quit(env):
         await Z.until(() => win.document.documentElement.hasAttribute("zenx-hidden"), "A hidden", 15000);
         """
     )
-    b.js(
-        """
-        const win = Z.win();
-        win.resizeTo(900, 650);
-        win.moveTo(120, 70);
-        await Z.until(() => win.screenX === 120 && win.outerWidth === 900, "B moved", 5000);
-        """
-    )
+    return a, b
+
+
+def wait_exit(inst, timeout=30):
+    start = time.time()
+    while time.time() - start < timeout:
+        if inst.process.poll() is not None:
+            return True
+        time.sleep(0.3)
+    return False
+
+
+def scenario_one_quit_for_all(env):
+    """
+    ZenX is one app: quitting the profile in front also quits the profile
+    hidden behind it, instead of showing its window (no second Cmd+Q).
+    """
+    a, b = switch_to_other_profile(env)
     b.quit()
     env.instances.remove(b)
-    frame = a.js(
+    check(wait_exit(a), "A quits together with B")
+    env.instances.remove(a)
+
+
+def scenario_last_window_closed(env):
+    """
+    Closing the last window of the profile in front leaves the app without
+    windows (macOS): the hidden profile's window doesn't come back. A quit
+    after that still quits both.
+    """
+    a, b = switch_to_other_profile(env)
+    # B has no window for Marionette once it's closed, so B quits by a timer.
+    b.js(
         """
-        await Z.until(() => !Z.win().document.documentElement.hasAttribute("zenx-hidden"), "A shown after B quit", 15000);
-        return Z.zenx().windowFrame(Z.win());
+        const close = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+        const quit = Cc["@mozilla.org/timer;1"].createInstance(Ci.nsITimer);
+        Services.__zenxE2ETimers = [close, quit];
+        close.initWithCallback(() => Z.win().close(), 200, Ci.nsITimer.TYPE_ONE_SHOT);
+        quit.initWithCallback(() => Services.startup.quit(Ci.nsIAppStartup.eAttemptQuit), 5000, Ci.nsITimer.TYPE_ONE_SHOT);
         """
     )
-    check(frame == "120,70,900,650", f"A's window comes back in B's place when B quits: {frame}")
+    try:
+        b.client.delete_session(send_request=False)
+    except Exception:
+        pass
+    env.instances.remove(b)
+    time.sleep(2.5)
+    still_hidden = a.js(
+        """
+        return Z.win().document.documentElement.hasAttribute("zenx-hidden");
+        """
+    )
+    check(still_hidden, "A stays hidden when B's last window closes")
+    check(wait_exit(a), "A quits when B quits after that")
+    env.instances.remove(a)
 
 
 def scenario_new_profile_and_switching(env):
@@ -1515,7 +1552,8 @@ SCENARIOS = [
     scenario_import_other_arc_profile,
     scenario_import_all_arc_profiles,
     scenario_new_profile_and_switching,
-    scenario_one_window_on_quit,
+    scenario_one_quit_for_all,
+    scenario_last_window_closed,
     scenario_delete_profile,
     scenario_restart_with_two_profiles,
 ]
