@@ -81,10 +81,22 @@ add_task(async function test_shows_and_opens_spaces_of_other_profiles() {
     () => SelectableProfileService.sendCommandLine.called,
     "Clicking should hand off to the other profile"
   );
+  const frame = ZenXProfileSpaces.windowFrame(window);
   Assert.deepEqual(
     SelectableProfileService.sendCommandLine.lastCall.args,
-    ["/fake/profiles/Personal", ["--zenx-space", "remote-space-1"], true],
-    "The running instance should be asked to switch to the space"
+    [
+      "/fake/profiles/Personal",
+      [
+        "--zenx-space",
+        "remote-space-1",
+        "--zenx-frame",
+        frame,
+        "--zenx-from",
+        `${ZenXProfileSpaces.currentProfileId}`,
+      ],
+      true,
+    ],
+    "The running instance should be asked to switch to the space, in this window's place"
   );
 
   // When the other profile is not running, it is started on that space.
@@ -98,8 +110,8 @@ add_task(async function test_shows_and_opens_spaces_of_other_profiles() {
   Assert.ok(
     args
       .join(" ")
-      .endsWith(
-        "--profile /fake/profiles/Personal --zenx-space remote-space-1"
+      .includes(
+        "--profile /fake/profiles/Personal --zenx-space remote-space-1 --zenx-frame"
       ),
     `The profile should start on the space (${args.join(" ")})`
   );

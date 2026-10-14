@@ -60,6 +60,8 @@ class nsZenXProfileSpacesUI {
 
     ZenXProfileSpaces.addListener(this.#listener);
     await ZenXProfileSpaces.init();
+    // Started from another profile's switcher: take that window's place.
+    ZenXProfileSpaces.takePendingWindowPlace(window);
     this.#update();
     ZenXProfileSpaces.schedulePublish();
     // Spaces sent here while this profile was not running.
@@ -372,7 +374,8 @@ class nsZenXProfileSpacesUI {
     if (target.classList.contains("zenx-remote-space")) {
       await ZenXProfileSpaces.openRemoteSpace(
         parseInt(target.getAttribute("zenx-profile-id")),
-        target.getAttribute("zenx-space-id")
+        target.getAttribute("zenx-space-id"),
+        window
       );
       return;
     }

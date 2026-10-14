@@ -16,7 +16,7 @@
 
 - **Spaces in separate profiles, like Arc.** Every space belongs to a browser profile. Extensions, history, cookies and logins are shared only by the spaces of one profile.
   - Right-click a space → **Set Profile** to move it to another profile, or to a new one.
-  - The space switcher shows the spaces of all profiles in one shared order. Clicking a space of another profile brings that profile's window to the front.
+  - The space switcher shows the spaces of all profiles in one shared order. Clicking a space of another profile switches to it in the same place on screen, so it feels like one window: that profile's window takes this one's position and size, and this one hides.
 - **Import from Arc.** Arc appears in the import wizard. Your spaces come over with their names, emoji and colors. **Pinned tabs stay pinned tabs** (not bookmarks), folders and split views are kept, and favorites become essentials. Each Arc profile goes into a ZenX profile of the same name, with its own history and logins, and all of them can be imported at once.
 - **Installs next to Zen.** ZenX has its own app, profiles (`~/Library/Application Support/zenx`) and bundle id (`com.doctorspider42.zenx`).
 - **Signed, notarized builds with automatic updates** from this repository's releases.

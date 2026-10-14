@@ -55,6 +55,8 @@ export const OPEN_PROFILE_EDITOR_PREF = `${PREF_BRANCH}open-profile-editor`;
 // Seeded into profiles ZenX creates for a space: drop the empty space Zen
 // makes on first start once the moved space has arrived.
 const FRESH_PROFILE_PREF = `${PREF_BRANCH}fresh-profile`;
+// Local: the window of another profile the first window takes the place of.
+const PENDING_WINDOW_PLACE_PREF = `${PREF_BRANCH}pending-window-place`;
 // Shared: what an import run in another profile brought in, read by the
 // profile that asked for it. `<prefix><handoffId>`.
 const IMPORT_RESULT_PREFIX = `${PREF_BRANCH}import-result.`;
@@ -141,6 +143,7 @@ class nsZenXProfileSpaces {
     Services.prefs.addObserver(PREF_BRANCH, this);
     Services.obs.addObserver(this, "sps-profiles-updated");
     Services.obs.addObserver(this, "quit-application-granted");
+    Services.ww.registerNotification(this);
     this.#publishTask = new lazy.DeferredTask(
       () => this.#publishRegistry(),
       PUBLISH_DELAY_MS
@@ -206,6 +209,16 @@ class nsZenXProfileSpaces {
         break;
       case "quit-application-granted":
         this.#publishTask?.finalize();
+        this.#revealHiddenPeer();
+        break;
+      case "domwindowclosed":
+        if (
+          aSubject.document?.documentElement?.getAttribute("windowtype") ===
+            "navigator:browser" &&
+          !this.#visibleBrowserWindows().some(win => win !== aSubject)
+        ) {
+          this.#revealHiddenPeer();
+        }
         break;
     }
   }
@@ -439,20 +452,171 @@ class nsZenXProfileSpaces {
 
   // Mark: switching
 
+  /** Profile whose windows this profile hid by taking their place. */
+  #hiddenPeerId = null;
+
+  /**
+   * A window of another profile to take the place of, for the first window
+   * of this profile (it is started for that).
+   *
+   * @param {string} aFrame see windowFrame()
+   * @param {?number} aFromProfileId
+   */
+  setPendingWindowPlace(aFrame, aFromProfileId) {
+    Services.prefs.setStringPref(
+      PENDING_WINDOW_PLACE_PREF,
+      JSON.stringify({ frame: aFrame, from: aFromProfileId })
+    );
+  }
+
+  /** @param {Window} aWindow the first window of this profile */
+  takePendingWindowPlace(aWindow) {
+    const pending = readJSONPref(PENDING_WINDOW_PLACE_PREF, null);
+    if (!pending) {
+      return;
+    }
+    Services.prefs.clearUserPref(PENDING_WINDOW_PLACE_PREF);
+    this.takeWindowPlace(aWindow, pending.frame, pending.from);
+  }
+
+  /**
+   * Position and size of a window as "x,y,width,height", or null for a full
+   * screen window (it has a desktop of its own).
+   *
+   * @param {Window} aWindow
+   */
+  windowFrame(aWindow) {
+    if (aWindow.windowState === aWindow.STATE_FULLSCREEN) {
+      return null;
+    }
+    return [
+      aWindow.screenX,
+      aWindow.screenY,
+      aWindow.outerWidth,
+      aWindow.outerHeight,
+    ]
+      .map(Math.round)
+      .join(",");
+  }
+
+  #setWindowVisible(aWindow, aVisible) {
+    aWindow.docShell.treeOwner.QueryInterface(Ci.nsIBaseWindow).visibility =
+      aVisible;
+    aWindow.document.documentElement.toggleAttribute("zenx-hidden", !aVisible);
+  }
+
+  #visibleBrowserWindows() {
+    return lazy.BrowserWindowTracker.orderedWindows.filter(
+      win =>
+        !win.closed && !win.document.documentElement.hasAttribute("zenx-hidden")
+    );
+  }
+
+  /**
+   * Shows a window of this profile where another profile's window was, and
+   * hides that one, so switching between profiles feels like one window.
+   *
+   * @param {Window} aWindow
+   * @param {?string} aFrame see windowFrame()
+   * @param {?number} aFromProfileId profile whose window to hide
+   */
+  takeWindowPlace(aWindow, aFrame, aFromProfileId) {
+    // Shown first: a hidden window ignores moves and resizes.
+    for (const win of lazy.BrowserWindowTracker.orderedWindows) {
+      if (win.document.documentElement.hasAttribute("zenx-hidden")) {
+        this.#setWindowVisible(win, true);
+      }
+    }
+    const [x, y, width, height] = String(aFrame ?? "")
+      .split(",")
+      .map(Number);
+    if (
+      [x, y, width, height].every(Number.isFinite) &&
+      width > 0 &&
+      height > 0
+    ) {
+      if (aWindow.windowState === aWindow.STATE_FULLSCREEN) {
+        aWindow.fullScreen = false;
+      }
+      aWindow.resizeTo(width, height);
+      aWindow.moveTo(x, y);
+    }
+    aWindow.focus();
+
+    const from = this.#getProfile(aFromProfileId);
+    if (!aFrame || !from || from.id === this.currentProfileId) {
+      return;
+    }
+    this.#hiddenPeerId = from.id;
+    try {
+      this.#sps.sendCommandLine(from.path, ["--zenx-hide"], false);
+    } catch (e) {
+      // That profile isn't running any more.
+      this.#hiddenPeerId = null;
+    }
+  }
+
+  /** Another profile's window took this profile's place: hide our windows. */
+  hideWindows() {
+    // Whoever we had hidden is shown again by the profile now in front.
+    this.#hiddenPeerId = null;
+    for (const win of lazy.BrowserWindowTracker.orderedWindows) {
+      if (!win.closed) {
+        this.#setWindowVisible(win, false);
+      }
+    }
+  }
+
+  /**
+   * This profile is going away (quit, or its last window closed): bring back
+   * the window it hid, in its place.
+   */
+  #revealHiddenPeer() {
+    const peer = this.#getProfile(this.#hiddenPeerId);
+    this.#hiddenPeerId = null;
+    if (!peer) {
+      return;
+    }
+    const args = ["--zenx-show"];
+    const win = lazy.BrowserWindowTracker.getTopWindow({ private: false });
+    const frame = win && !win.closed && this.windowFrame(win);
+    if (frame) {
+      args.push("--zenx-frame", frame);
+    }
+    try {
+      this.#sps.sendCommandLine(peer.path, args, true);
+    } catch (e) {
+      // It quit too.
+    }
+  }
+
   /**
    * Brings up the given space of another profile, starting that profile's
    * process if needed.
    *
    * @param {number} aProfileId
    * @param {string} aSpaceUuid
+   * @param {?Window} [aWindow] the window the switch is made from; the other
+   *   profile's window takes its place and hides it
    */
-  async openRemoteSpace(aProfileId, aSpaceUuid) {
+  async openRemoteSpace(aProfileId, aSpaceUuid, aWindow = null) {
     const profile = this.#getProfile(aProfileId);
     if (!profile) {
       return;
     }
     // See ZenXCommandLine.sys.mjs, it also cleans up after a relaunch.
     const args = ["--zenx-space", aSpaceUuid];
+    // Like Arc, one window: the other profile's window takes this one's place
+    // and then hides it.
+    const frame = aWindow && this.windowFrame(aWindow);
+    if (frame && this.currentProfileId !== null) {
+      args.push(
+        "--zenx-frame",
+        frame,
+        "--zenx-from",
+        `${this.currentProfileId}`
+      );
+    }
     try {
       this.#sps.sendCommandLine(profile.path, args, true);
       return;

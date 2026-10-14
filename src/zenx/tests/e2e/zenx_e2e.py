@@ -1031,6 +1031,45 @@ def scenario_import_all_arc_profiles(env):
     )
 
 
+def scenario_one_window_on_quit(env):
+    """
+    Switching to another profile's space hides this profile's window behind
+    it. When the profile in front quits, the hidden window comes back in its
+    place, so there's never no window.
+    """
+    a = env.launch()
+    a.js("await Z.ready();")
+    env.install_profile_launcher(a)
+    import_arc(a, "Profile 1", timeout_ms=120000)
+    b = env.connect_launched(a)
+    b.js("await Z.ready();")
+    a.js(
+        """
+        const win = await Z.ready();
+        const button = await Z.until(() => win.document.querySelector("#zen-workspaces-button .zenx-remote-space"), "a space of B in A's switcher", 20000);
+        button.doCommand();
+        await Z.until(() => win.document.documentElement.hasAttribute("zenx-hidden"), "A hidden", 15000);
+        """
+    )
+    b.js(
+        """
+        const win = Z.win();
+        win.resizeTo(900, 650);
+        win.moveTo(120, 70);
+        await Z.until(() => win.screenX === 120 && win.outerWidth === 900, "B moved", 5000);
+        """
+    )
+    b.quit()
+    env.instances.remove(b)
+    frame = a.js(
+        """
+        await Z.until(() => !Z.win().document.documentElement.hasAttribute("zenx-hidden"), "A shown after B quit", 15000);
+        return Z.zenx().windowFrame(Z.win());
+        """
+    )
+    check(frame == "120,70,900,650", f"A's window comes back in B's place when B quits: {frame}")
+
+
 def scenario_new_profile_and_switching(env):
     a = env.launch()
     a.js("await Z.ready();")
@@ -1172,6 +1211,16 @@ def scenario_new_profile_and_switching(env):
         await win.gZenWorkspaces.changeWorkspaceWithID(other.uuid);
         """
     )
+    a_frame = a.js(
+        """
+        const win = await Z.ready();
+        // A frame of its own, so taking its place is visible in the test.
+        win.resizeTo(1000, 700);
+        win.moveTo(40, 60);
+        await Z.until(() => win.outerWidth === 1000, "A resized", 5000);
+        return Z.zenx().windowFrame(win);
+        """
+    )
     a.js(
         """
         const win = await Z.ready();
@@ -1195,6 +1244,43 @@ def scenario_new_profile_and_switching(env):
         b_windows == 1,
         f"...in the existing window, without opening a new one (windows: {b_windows})",
     )
+
+    # One window, like Arc: B's window took A's place and A's is hidden.
+    b_frame = b.js(
+        "const want = args[0]; return await Z.until(() => Z.zenx().windowFrame(Z.win()) === want && want, 'B in the place of A', 10000).catch(() => Z.zenx().windowFrame(Z.win()));",
+        a_frame,
+    )
+    check(b_frame == a_frame, f"B's window takes A's place: {a_frame} -> {b_frame}")
+    a_hidden = a.js(
+        "return await Z.until(() => Z.win().document.documentElement.hasAttribute('zenx-hidden'), 'A hidden', 10000).catch(() => false);"
+    )
+    check(a_hidden, "A's window is hidden behind it")
+    check(
+        not b.js("return Z.win().document.documentElement.hasAttribute('zenx-hidden');"),
+        "B's window is shown",
+    )
+
+    # And back: A's space in B's switcher brings A's window back, B hides.
+    b.js(
+        """
+        const win = await Z.ready();
+        win.moveTo(80, 90);
+        await Z.until(() => win.screenX === 80, "B moved", 5000);
+        const button = await Z.until(() => win.document.querySelector("#zen-workspaces-button .zenx-remote-space"), "a space of A in B's switcher");
+        button.doCommand();
+        """
+    )
+    back = a.js(
+        """
+        await Z.until(() => !Z.win().document.documentElement.hasAttribute('zenx-hidden'), 'A shown again', 10000);
+        return Z.zenx().windowFrame(Z.win());
+        """
+    )
+    check(back.startswith("80,90,"), f"A's window comes back where B's was: {back}")
+    b_hidden = b.js(
+        "return await Z.until(() => Z.win().document.documentElement.hasAttribute('zenx-hidden'), 'B hidden', 10000).catch(() => false);"
+    )
+    check(b_hidden, "B's window is hidden after switching back")
 
     # The same request through a relaunch handed over to the running profile
     # (what happens when it can't be reached directly).
@@ -1338,6 +1424,7 @@ SCENARIOS = [
     scenario_import_other_arc_profile,
     scenario_import_all_arc_profiles,
     scenario_new_profile_and_switching,
+    scenario_one_window_on_quit,
     scenario_delete_profile,
     scenario_restart_with_two_profiles,
 ]
