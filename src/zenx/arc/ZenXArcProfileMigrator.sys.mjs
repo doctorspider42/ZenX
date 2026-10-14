@@ -22,6 +22,7 @@
 import { ChromeProfileMigrator } from "resource:///modules/ChromeProfileMigrator.sys.mjs";
 import { MigrationUtils } from "resource:///modules/MigrationUtils.sys.mjs";
 import {
+  addArcFaviconsFromProfile,
   getArcImportWindow,
   getArcUserDataPath,
   importArcIntoWindow,
@@ -175,6 +176,10 @@ export class ArcProfileMigrator extends ChromeProfileMigrator {
         type: MigrationUtils.resourceTypes.BOOKMARKS,
         async migrate(aCallback) {
           try {
+            await addArcFaviconsFromProfile(
+              sidebar,
+              aProfile?.id ?? DEFAULT_ARC_PROFILE
+            ).catch(e => console.error("ZenX: no icons from Arc", e));
             const win = getArcImportWindow();
             if (isWindowBusy(win)) {
               // From Zen's welcome screen: the spaces are created once it is

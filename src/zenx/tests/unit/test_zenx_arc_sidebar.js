@@ -3,10 +3,15 @@
 
 "use strict";
 
-const { parseArcSidebar, summarizeArcImport, arcProfileDirectory } =
-  ChromeUtils.importESModule(
-    "resource:///modules/zenx/arc/ZenXArcSidebar.sys.mjs"
-  );
+const {
+  addArcFavicons,
+  arcProfileDirectory,
+  forEachArcTab,
+  parseArcSidebar,
+  summarizeArcImport,
+} = ChromeUtils.importESModule(
+  "resource:///modules/zenx/arc/ZenXArcSidebar.sys.mjs"
+);
 
 let fixture;
 
@@ -196,4 +201,45 @@ add_task(function test_named_icons() {
 
 add_task(function test_not_an_arc_file() {
   Assert.throws(() => parseArcSidebar({}), /Not an Arc sidebar file/);
+});
+
+add_task(function test_favicons() {
+  const parsed = {
+    spaces: [
+      {
+        items: [
+          { type: "tab", url: "https://www.example.com/a" },
+          {
+            type: "folder",
+            items: [{ type: "tab", url: "https://example.org/b" }],
+          },
+          {
+            type: "splitView",
+            tabs: [
+              { type: "tab", url: "https://example.net/" },
+              { type: "tab", url: "https://example.com/c" },
+            ],
+          },
+        ],
+      },
+    ],
+    essentials: [{ url: "https://example.org/b" }],
+  };
+  addArcFavicons(
+    parsed,
+    new Map([
+      ["https://example.com/other", "site-icon"],
+      ["https://example.com/c", "page-icon"],
+      ["https://example.org/b", "org-icon"],
+    ])
+  );
+  const images = [];
+  forEachArcTab(parsed, tab => images.push([tab.url, tab.image]));
+  Assert.deepEqual(images, [
+    ["https://www.example.com/a", "site-icon"],
+    ["https://example.org/b", "org-icon"],
+    ["https://example.net/", undefined],
+    ["https://example.com/c", "page-icon"],
+    ["https://example.org/b", "org-icon"],
+  ]);
 });

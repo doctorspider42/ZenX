@@ -245,7 +245,7 @@ function spaceTheme(space) {
  * @returns {{
  *   spaces: Array<{arcId: string, name: string, icon?: string, theme?: object,
  *     items: Array<object>}>,
- *   essentials: Array<{url: string, label?: string}>,
+ *   essentials: Array<{url: string, label?: string, image?: string}>,
  *   skipped: number,
  * }} spaces with items in the format ZenShareManager.importSpace() takes
  */
@@ -371,6 +371,62 @@ export function parseArcSidebar(
   }
 
   return { spaces, essentials, skipped };
+}
+
+function siteOf(url) {
+  return /^[a-z][a-z0-9+.-]*:\/\/(?:www\.)?([^/?#:]+)/i.exec(url)?.[1] ?? null;
+}
+
+/**
+ * Gives the tabs and favorites of a parsed sidebar the icon Arc has for
+ * their page, or else for another page of the same site (a pinned tab is
+ * often a page Arc never stored an icon for).
+ *
+ * @param {object} aParsed result of parseArcSidebar(), changed in place
+ * @param {Map<string, string>} aIconsByPage page URL → icon (data: URL)
+ */
+export function addArcFavicons(aParsed, aIconsByPage) {
+  if (!aIconsByPage.size) {
+    return;
+  }
+  const bySite = new Map();
+  for (const [page, icon] of aIconsByPage) {
+    const site = siteOf(page);
+    if (site && !bySite.has(site)) {
+      bySite.set(site, icon);
+    }
+  }
+  forEachArcTab(aParsed, tab => {
+    const icon = aIconsByPage.get(tab.url) ?? bySite.get(siteOf(tab.url));
+    if (icon) {
+      tab.image = icon;
+    }
+  });
+}
+
+/**
+ * Calls aCallback with every tab of a parsed sidebar: in spaces, folders and
+ * split views, and favorites.
+ *
+ * @param {object} aParsed result of parseArcSidebar()
+ * @param {Function} aCallback
+ */
+export function forEachArcTab(aParsed, aCallback) {
+  const visit = items => {
+    for (const item of items) {
+      if (item.type === "tab") {
+        aCallback(item);
+      } else if (item.type === "folder") {
+        visit(item.items);
+      } else if (item.type === "splitView") {
+        visit(item.tabs);
+      }
+    }
+  };
+  for (const space of aParsed.spaces) {
+    visit(space.items);
+  }
+  aParsed.essentials.forEach(aCallback);
 }
 
 /**

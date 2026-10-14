@@ -29,11 +29,14 @@ import os
 import plistlib
 import shutil
 import socket
+import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
 import time
 import traceback
+import zlib
 from pathlib import Path
 
 from marionette_driver.marionette import Marionette
@@ -443,6 +446,55 @@ class Instance:
             self.process.kill()
 
 
+def tiny_png(rgb):
+    """A 16x16 PNG in one color."""
+    row = b"\x00" + bytes(rgb) * 16
+
+    def chunk(kind, data):
+        return (
+            struct.pack(">I", len(data))
+            + kind
+            + data
+            + struct.pack(">I", zlib.crc32(kind + data))
+        )
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", 16, 16, 8, 2, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(row * 16))
+        + chunk(b"IEND", b"")
+    )
+
+
+def write_arc_favicons(path):
+    """
+    Arc's (Chromium's) Favicons database with an icon for a page of the
+    synthetic tabs' site, but none of the tabs' own pages: imported tabs get
+    it by site.
+    """
+    db = sqlite3.connect(path)
+    db.executescript(
+        """
+        CREATE TABLE favicons (id INTEGER PRIMARY KEY, url LONGVARCHAR NOT NULL, icon_type INTEGER DEFAULT 1);
+        CREATE TABLE favicon_bitmaps (id INTEGER PRIMARY KEY, icon_id INTEGER NOT NULL, last_updated INTEGER DEFAULT 0,
+          image_data BLOB, width INTEGER DEFAULT 0, height INTEGER DEFAULT 0, last_requested INTEGER DEFAULT 0);
+        CREATE TABLE icon_mapping (id INTEGER PRIMARY KEY, page_url LONGVARCHAR NOT NULL, icon_id INTEGER);
+        """
+    )
+    db.execute("INSERT INTO favicons VALUES (1, 'https://example.com/favicon.ico', 1)")
+    db.execute(
+        "INSERT INTO favicon_bitmaps (id, icon_id, image_data, width, height) VALUES (1, 1, ?, 16, 16)",
+        (tiny_png((200, 40, 40)),),
+    )
+    db.execute(
+        "INSERT INTO favicon_bitmaps (id, icon_id, image_data, width, height) VALUES (2, 1, ?, 256, 256)",
+        (b"too big",),
+    )
+    db.execute("INSERT INTO icon_mapping VALUES (1, 'https://example.com/visited', 1)")
+    db.commit()
+    db.close()
+
+
 class Env:
     """
     An isolated ZenX: its own profile root and remoting name (through a test
@@ -463,6 +515,7 @@ class Env:
         self.arc_dir = self.tmp / "Arc"
         (self.arc_dir / "User Data" / "Default").mkdir(parents=True)
         (self.arc_dir / "User Data" / "Profile 1").mkdir(parents=True)
+        write_arc_favicons(self.arc_dir / "User Data" / "Default" / "Favicons")
         sidebar, self.expected_arc = synthetic_arc()
         (self.arc_dir / "StorableSidebar.json").write_text(
             json.dumps(sidebar, ensure_ascii=False)
@@ -801,6 +854,28 @@ def scenario_first_run(env):
     )
 
 
+def check_arc_tabs_look_loaded(inst, label):
+    """Imported tabs show their Arc title and icon before they are loaded."""
+    tabs = inst.js(
+        """
+        const win = await Z.ready();
+        const arcSpaces = new Set(win.gZenWorkspaces.getWorkspaces().filter(s => s.zenxArcId).map(s => s.uuid));
+        return win.gZenWorkspaces.allStoredTabs
+          .filter(t => !t.hasAttribute("zen-empty-tab") && t.hasAttribute("pending")
+            && (t.hasAttribute("zen-essential") || arcSpaces.has(t.getAttribute("zen-workspace-id"))))
+          .map(t => ({ label: t.label, icon: (t.getAttribute("image") || "").startsWith("data:image/png") }));
+        """
+    )
+    check(tabs, f"{label}: imported tabs are there, not loaded yet")
+    untitled = [t for t in tabs if t["label"] == "New Tab"]
+    check(
+        not untitled,
+        f"{label}: no imported tab says 'New Tab' ({len(untitled)} of {len(tabs)})",
+    )
+    no_icon = [t["label"] for t in tabs if not t["icon"]]
+    check(not no_icon, f"{label}: imported tabs have Arc's icon (missing: {no_icon})")
+
+
 def scenario_import_into_empty(env):
     inst = env.launch()
     inst.js("await Z.ready();")
@@ -810,6 +885,7 @@ def scenario_import_into_empty(env):
     check(ui_responsive(inst), "UI responds to a space switch right after import")
     check_arc_spaces(env, inst.js("return Z.spaces();"), "after import")
     check(inst.js("return Z.essentials();") == 1, "favorite became an essential")
+    check_arc_tabs_look_loaded(inst, "after import")
     check_space_menu(inst, "after import", expect_profiles=0)
     for n in (1, 2):
         inst = restart(env, inst)
@@ -823,6 +899,7 @@ def scenario_import_into_empty(env):
             ],
         )
         check_arc_spaces(env, inst.js("return Z.spaces();"), f"after restart {n}")
+        check_arc_tabs_look_loaded(inst, f"after restart {n}")
         check(ui_responsive(inst), f"UI responds after restart {n}")
 
 

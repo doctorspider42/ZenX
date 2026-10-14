@@ -28,7 +28,7 @@ Zen files that ZenX changes today:
 | `src/zen/moz.build` | builds `../zenx` |
 | `src/zen/common/ZenPreloadedScripts.js` | loads `ZenXProfileSpacesUI.mjs` in browser windows |
 | `src/zen/zen.globals.mjs` | lint global `gZenXProfileSpaces` |
-| `src/zen/share/ZenShareManager.mjs` | public `importSpace(item)`, which returns the new space |
+| `src/zen/share/ZenShareManager.mjs` | public `importSpace(item)`, which returns the new space; bug fix: an imported tab shows its title before it loads (Zen's label gate dropped `lazyTabTitle`, the tab said "New Tab"). Worth sending upstream. |
 | `src/zen/common/modules/ZenUpdates.mjs` | bug fix: `playWindowSweepAnimation` runs one sweep at a time, animates its own elements (not by id), always removes them and never takes clicks. Importing several spaces at once used to leave full-window overlays that swallowed every click ("frozen" browser). Worth sending upstream. |
 | `src/zen/folders/ZenFolders.mjs` | bug fix: a folder's empty tab belongs to the folder's space. Without it, a folder created in a space that isn't active came back in the active space after a restart. Worth sending upstream. |
 | `prefs/firefox/browser.yaml` | `browser.profiles.enabled = true` |
@@ -112,6 +112,7 @@ In the spirit of Zen's own importers, **Arc** appears in the import wizard on ma
 - Arc profiles map to ZenX profiles. The Arc profile picked in the wizard goes into the ZenX profile with the same name. If there is none, Arc's default profile goes into the current profile, and any other Arc profile (e.g. "Work") gets a new ZenX profile with its name. Everything picked in the wizard (spaces, history, logins…) is imported inside that profile, so one Arc profile's history never lands in another's. The wizard sends the import through a handoff (`import` instead of `space`), the target profile runs the same migrator, and it reports the counts back in `zenx.profile-spaces.import-result.<handoffId>`. With several Arc profiles, the wizard lists "all Arc profiles" first (e.g. "Your Arc + Work"). It imports every Arc profile in turn by these rules and shows the combined counts.
 - Arc keeps several sidebar containers with spaces (newer versions put Little Arc's in one of its own). All of them are read. Little Arc's untitled space with no pinned tabs is left out.
 - From Zen's welcome screen the wizard opens as a modal window, which suspends the browser window's timers and animations. While that window or the welcome screen is up, the wizard reports what will be imported and the spaces are created once both are gone (`isWindowBusy` / `whenWindowFree` in `ZenXArcImporter.sys.mjs`).
+- Imported tabs aren't loaded until they're opened, but they show Arc's title and icon right away. The icons come from Arc's Chromium `Favicons` database: the icon of the tab's page, or else of another page of the same site, as a `data:` URL. Zen only changes the label of a tab that isn't shown when it is flagged (`_zenChangeLabelFlag`), so without the ZenX hook in `ZenShareManager` (and `showImportedTabLabel` for favorites) the tabs said "New Tab" until a restart.
 - Importing again skips spaces that were already imported (`workspace.zenxArcId`), only giving them an icon if they have none, and favorites that are already essentials.
 - Not imported: easels, notes and other Arc-only items, `arc://` pages, Arc's symbol space icons that Zen has no similar icon for (most common ones map to Zen's, e.g. `planet`, `bolt` → `lightning`), and Arc's Chromium bookmarks if Arc has none (this is the usual case).
 
@@ -131,7 +132,7 @@ The wizard lists Arc because `prefs/zenx/arc.yaml` sets `browser.migrate.arc.ena
 Scenarios:
 
 - first run
-- import into an empty profile, then two restarts
+- import into an empty profile, then two restarts (tabs show Arc's titles and icons before they load)
 - import with existing data, and importing twice
 - New Profile from a space, switching between profiles, and moving a space to an existing profile
 - deleting a profile
