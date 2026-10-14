@@ -18,6 +18,7 @@ const lazy = {};
 
 ChromeUtils.defineESModuleGetters(lazy, {
   BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.sys.mjs",
+  ZenXProfileSpaces: "resource:///modules/zenx/ZenXProfileSpaces.sys.mjs",
   MigrationUtils: "resource:///modules/MigrationUtils.sys.mjs",
   setTimeout: "resource://gre/modules/Timer.sys.mjs",
   TabStateCache:
@@ -203,11 +204,15 @@ export function getArcImportWindow() {
  *
  * @param {object} aParsed result of parseArcSidebar()
  * @param {Window} [aWindow] defaults to the most recent browser window
+ * @param {object} [aOptions]
+ * @param {boolean} [aOptions.firstRun] imported on the first start (from
+ *   Zen's welcome screen): Zen's starter spaces go, the Arc ones replace them
  * @returns {Promise<{spaces: number, tabs: number, essentials: number}>}
  */
 export async function importArcIntoWindow(
   aParsed,
-  aWindow = getArcImportWindow()
+  aWindow = getArcImportWindow(),
+  { firstRun = false } = {}
 ) {
   const { gZenWorkspaces, gZenShareManager, gZenPinnedTabManager, gBrowser } =
     aWindow;
@@ -292,6 +297,9 @@ export async function importArcIntoWindow(
   await gZenWorkspaces.changeWorkspaceWithID(
     firstImported?.uuid ?? previousSpace
   );
+  if (firstRun) {
+    await lazy.ZenXProfileSpaces.removeStarterSpaces(aWindow);
+  }
   return result;
 }
 

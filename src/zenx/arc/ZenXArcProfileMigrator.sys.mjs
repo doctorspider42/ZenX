@@ -181,6 +181,10 @@ export class ArcProfileMigrator extends ChromeProfileMigrator {
               aProfile?.id ?? DEFAULT_ARC_PROFILE
             ).catch(e => console.error("ZenX: no icons from Arc", e));
             const win = getArcImportWindow();
+            // Zen's welcome screen only runs on the first start. Only then do
+            // Zen's starter spaces go; a later import never removes spaces.
+            const firstRun =
+              win.document.documentElement.hasAttribute("zen-welcome-stage");
             if (isWindowBusy(win)) {
               // From Zen's welcome screen: the spaces are created once it is
               // done, the wizard reports what will come.
@@ -189,7 +193,7 @@ export class ArcProfileMigrator extends ChromeProfileMigrator {
               MigrationUtils._importQuantities.bookmarks +=
                 pinnedTabs + tabs + essentials;
               whenWindowFree(win)
-                .then(() => importArcIntoWindow(sidebar, win))
+                .then(() => importArcIntoWindow(sidebar, win, { firstRun }))
                 .catch(e => console.error("ZenX: Arc spaces import failed", e));
               aCallback(true);
               return;

@@ -95,6 +95,15 @@ export function toSharedJSON(value) {
   );
 }
 
+/**
+ * A URL without its query and fragment, to compare pages.
+ *
+ * @param {string} aUrl
+ */
+function withoutQuery(aUrl) {
+  return String(aUrl).replace(/[?#].*$/, "");
+}
+
 function readJSONPref(name, fallback) {
   try {
     const value = Services.prefs.getStringPref(name, "");
@@ -1192,6 +1201,9 @@ class nsZenXProfileSpaces {
       ["zen.updates.last-build-id", Services.appinfo.appBuildID],
       [OPEN_PROFILE_EDITOR_PREF, !name],
       [FRESH_PROFILE_PREF, true],
+      // No first-run pages (Zen's welcome and privacy policy): they would
+      // keep Zen's starter space from being removed.
+      ["browser.startup.homepage_override.mstone", "ignore"],
     ];
     await IOUtils.writeUTF8(
       PathUtils.join(profile.path, "prefs.js"),
@@ -1489,24 +1501,61 @@ class nsZenXProfileSpaces {
     if (!Services.prefs.getBoolPref(FRESH_PROFILE_PREF, false)) {
       return;
     }
+    if (await this.removeStarterSpaces(aWindow)) {
+      Services.prefs.clearUserPref(FRESH_PROFILE_PREF);
+    }
+  }
+
+  /**
+   * Removes the spaces Zen creates on a profile's first start once spaces
+   * have arrived (moved from another profile or imported from Arc): spaces
+   * that hold nothing but empty tabs and first-run pages. A space with any
+   * other tab is kept.
+   *
+   * @param {Window} aWindow
+   * @returns {Promise<boolean>} false if no space has arrived yet
+   */
+  async removeStarterSpaces(aWindow) {
     const { gZenWorkspaces } = aWindow;
     const spaces = gZenWorkspaces.getWorkspaces();
     const arrived = space => space.zenxMovedFrom || space.zenxArcId;
     if (!spaces.some(arrived)) {
-      return;
+      return false;
     }
-    Services.prefs.clearUserPref(FRESH_PROFILE_PREF);
+    const firstRunPages = new Set(
+      [
+        "startup.homepage_welcome_url",
+        "startup.homepage_welcome_url.additional",
+      ]
+        .flatMap(pref => {
+          try {
+            return Services.urlFormatter.formatURLPref(pref).split("|");
+          } catch (e) {
+            return [];
+          }
+        })
+        .map(url => withoutQuery(url))
+        .filter(url => url && url !== "about:blank")
+    );
+    const isStarterTab = tab => {
+      if (tab.hasAttribute("zen-empty-tab")) {
+        return true;
+      }
+      const url = tab.linkedBrowser?.currentURI?.spec ?? "";
+      return url.startsWith("about:") || firstRunPages.has(withoutQuery(url));
+    };
     for (const space of spaces) {
-      const hasTabs = gZenWorkspaces.allStoredTabs.some(
-        tab =>
-          tab.getAttribute("zen-workspace-id") === space.uuid &&
-          !tab.hasAttribute("zen-empty-tab") &&
-          !tab.linkedBrowser?.currentURI?.spec.startsWith("about:editprofile")
+      if (arrived(space)) {
+        continue;
+      }
+      const tabs = gZenWorkspaces.allStoredTabs.filter(
+        tab => tab.getAttribute("zen-workspace-id") === space.uuid
       );
-      if (!arrived(space) && !hasTabs) {
+      if (tabs.every(isStarterTab)) {
         await gZenWorkspaces.removeWorkspace(space.uuid);
       }
     }
+    return true;
   }
 
   #hasSpaceMovedFrom(aWindow, aSourceUuid) {

@@ -889,6 +889,8 @@ def scenario_import_into_empty(env):
     check_arc_spaces(env, inst.js("return Z.spaces();"), "after import")
     check(inst.js("return Z.essentials();") == 1, "favorite became an essential")
     check_arc_tabs_look_loaded(inst, "after import")
+    others = [sp["name"] for sp in inst.js("return Z.spaces();") if not sp["arc"]]
+    check(others, "an import later than the first start keeps Zen's starter space")
     check_space_menu(inst, "after import", expect_profiles=0)
     for n in (1, 2):
         inst = restart(env, inst)
@@ -964,6 +966,10 @@ def scenario_import_from_welcome(env):
         const win = await Z.ready();
         // Headless runs skip Zen's welcome screen; put the window in its state.
         win.document.documentElement.setAttribute("zen-welcome-stage", "true");
+        // And the first-run page Zen opens in its starter space (not loaded).
+        win.gBrowser.addTrustedTab(Services.urlFormatter.formatURLPref("startup.homepage_welcome_url"), {
+          createLazyBrowser: true, inBackground: true, skipAnimation: true,
+        });
         const { MigrationUtils } = Z.module("resource:///modules/MigrationUtils.sys.mjs");
         const url = "chrome://browser/content/migration/migration-dialog-window.html";
         // A modal window: opening it blocks until it closes.
@@ -1018,6 +1024,10 @@ def scenario_import_from_welcome(env):
         "nothing changes in the window while the welcome screen runs",
     )
     check_arc_spaces(env, inst.js("return Z.spaces();"), "after the welcome screen")
+    others = [sp["name"] for sp in inst.js("return Z.spaces();") if not sp["arc"]]
+    check(
+        not others, f"the first start's import replaces Zen's starter space: {others}"
+    )
     check(ui_responsive(inst), "UI responds after importing from the welcome screen")
 
 
