@@ -9,6 +9,8 @@
 #
 #   scripts/zenx-release-local.sh               # build + publish origin/dev
 #   scripts/zenx-release-local.sh --no-publish  # build, sign, notarize only
+#   ZENX_RELEASE_REF=origin/<branch> scripts/zenx-release-local.sh --no-publish
+#                                               # same for a branch, e.g. a PR
 #
 # It works in a separate checkout (default ~/Projects/ZenX-release, a git
 # worktree of this repo at origin/dev), so release builds never mix with
@@ -33,11 +35,15 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 TREE="${ZENX_RELEASE_TREE:-$HOME/Projects/ZenX-release}"
 GH_REPO="doctorspider42/ZenX"
 NOTARY_PROFILE="${ZENX_NOTARY_PROFILE:-zenx-notary}"
+REF="${ZENX_RELEASE_REF:-origin/dev}"
 PUBLISH=1
 [ "${1:-}" = "--no-publish" ] && PUBLISH=0
 
 step() { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 die() { printf '\033[31mError:\033[0m %s\n' "$*" >&2; exit 1; }
+
+[ "$PUBLISH" = 0 ] || [ "$REF" = origin/dev ] ||
+  die "Only origin/dev is published; build $REF with --no-publish"
 
 # Mark: prerequisites
 
@@ -72,12 +78,12 @@ fi
 
 # Mark: source
 
-step "Release checkout $TREE at origin/dev"
-git -C "$REPO" fetch -q origin dev
+step "Release checkout $TREE at $REF"
+git -C "$REPO" fetch -q origin
 if [ ! -d "$TREE" ]; then
-  git -C "$REPO" worktree add --detach "$TREE" origin/dev
+  git -C "$REPO" worktree add --detach "$TREE" "$REF"
 else
-  git -C "$TREE" checkout -q --detach origin/dev
+  git -C "$TREE" checkout -q --detach "$REF"
 fi
 cd "$TREE"
 COMMIT="$(git rev-parse --short HEAD)"

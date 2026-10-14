@@ -181,6 +181,7 @@ Secrets:
 - It works in a separate git worktree, `~/Projects/ZenX-release` at `origin/dev`, so release builds never touch the development build.
 - It publishes the GitHub Release, including `update.xml`, and then starts `.github/workflows/zenx-publish-manifest.yml`. That workflow puts the manifest on GitHub Pages, which can only be deployed from Actions.
 - `--no-publish` stops after notarization.
+- `ZENX_RELEASE_REF=origin/<branch>` builds that branch instead, e.g. a PR to try out. Only `origin/dev` is published, so it needs `--no-publish`.
 
 One-time setup:
 
