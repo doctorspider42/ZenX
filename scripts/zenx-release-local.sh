@@ -17,8 +17,13 @@
 # Needs, once:
 #   brew install gh gnu-tar nss
 #   Developer ID Application certificate (with its key) in the login keychain
-#   xcrun notarytool store-credentials zenx-notary \
-#     --key AuthKey_XXXXXXXXXX.p8 --key-id XXXXXXXXXX --issuer <issuer uuid>
+#   App Store Connect API key for notarization, either
+#     ~/.config/zenx/notary.env with ZENX_NOTARY_KEY_ID=... and
+#     ZENX_NOTARY_ISSUER=<issuer uuid>, the key being
+#     ~/.appstoreconnect/private_keys/AuthKey_<key id>.p8 (or ZENX_NOTARY_KEY=path)
+#   or a notarytool keychain profile (some managed Macs remove these):
+#     xcrun notarytool store-credentials zenx-notary \
+#       --key AuthKey_XXXXXXXXXX.p8 --key-id XXXXXXXXXX --issuer <issuer uuid>
 #   The MAR signing key in the keychain (items "ZenX MAR private key" and
 #   "ZenX MAR certificate", account "zenx", base64 PEM).
 
@@ -43,8 +48,18 @@ IDENTITY="$(security find-identity -v -p codesigning | sed -nE 's/.*"(Developer 
 [ -n "$IDENTITY" ] || die "No Developer ID Application certificate with its private key in the keychain"
 APPLE_TEAM_ID="$(sed -E 's/.*\(([A-Z0-9]+)\)$/\1/' <<<"$IDENTITY")"
 export APPLE_TEAM_ID
-xcrun notarytool history --keychain-profile "$NOTARY_PROFILE" >/dev/null 2>&1 ||
-  die "No notarytool credentials '$NOTARY_PROFILE', see the header of this script"
+NOTARY_ENV="$HOME/.config/zenx/notary.env"
+# shellcheck disable=SC1090
+[ -f "$NOTARY_ENV" ] && . "$NOTARY_ENV"
+if [ -n "${ZENX_NOTARY_KEY_ID:-}" ] && [ -n "${ZENX_NOTARY_ISSUER:-}" ]; then
+  ZENX_NOTARY_KEY="${ZENX_NOTARY_KEY:-$HOME/.appstoreconnect/private_keys/AuthKey_$ZENX_NOTARY_KEY_ID.p8}"
+  [ -f "$ZENX_NOTARY_KEY" ] || die "Notarization key $ZENX_NOTARY_KEY not found"
+  NOTARY_AUTH=(--key "$ZENX_NOTARY_KEY" --key-id "$ZENX_NOTARY_KEY_ID" --issuer "$ZENX_NOTARY_ISSUER")
+else
+  NOTARY_AUTH=(--keychain-profile "$NOTARY_PROFILE")
+fi
+xcrun notarytool history "${NOTARY_AUTH[@]}" >/dev/null 2>&1 ||
+  die "No notarization credentials, see the header of this script"
 security find-generic-password -a zenx -s "ZenX MAR private key" >/dev/null 2>&1 ||
   die "MAR signing key not in the keychain"
 [ "$PUBLISH" = 0 ] || gh auth status >/dev/null 2>&1 || die "gh is not logged in"
@@ -148,7 +163,7 @@ rm -f "$OUT/temp.dmg"
 codesign -s "$IDENTITY" --timestamp "$DMG"
 
 step "Notarize (Apple's queue usually takes a few minutes)"
-xcrun notarytool submit "$DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+xcrun notarytool submit "$DMG" "${NOTARY_AUTH[@]}" --wait
 xcrun stapler staple "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose "$DMG"
 
