@@ -83,6 +83,10 @@ Code: `src/zenx/ZenXProfileSpaces.sys.mjs` (the per-process service) and `src/ze
 
 Turn the feature off with `zenx.profile-spaces.enabled = false`.
 
+## Trying a change by hand
+
+`scripts/zenx-demo.sh` copies the current build to `~/Projects/ZenX-demo/ZenX Demo.app` and starts it with `-app` and its own profile root (`~/Library/Application Support/zenx-demo`), next to an installed ZenX and without touching its profiles (`--reset` starts from a fresh root). A build in `engine/` started without `-app` uses the real `zenx` root, because the profile root is built in. Profiles the demo starts itself get the same `-app` through `ZENX_APP_INI`.
+
 ## Installer window
 
 The DMG window (background, icon positions, window size) is ZenX's own, in `build/zenx-dmg/`. Zen's `dsstore` was made for a volume named "Nightly", so on the "ZenX" volume Finder couldn't find its background. The release uses:

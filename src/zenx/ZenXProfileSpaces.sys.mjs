@@ -144,6 +144,7 @@ class nsZenXProfileSpaces {
   }
 
   async #init() {
+    this.#useAppIniForLaunches();
     Services.prefs.addObserver(PREF_BRANCH, this);
     Services.obs.addObserver(this, "sps-profiles-updated");
     Services.obs.addObserver(this, "quit-application-granted");
@@ -165,6 +166,27 @@ class nsZenXProfileSpaces {
       await this.disableStartupProfileSelector();
     }
     this.#notifyListeners();
+  }
+
+  /**
+   * Started with `-app <ini>` for a separate profile root (a demo or test
+   * install, see scripts/zenx-demo.sh): profiles this one starts must use the
+   * same ini, or they would open in the real profile root. The ini path comes
+   * from ZENX_APP_INI.
+   */
+  #useAppIniForLaunches() {
+    const appIni = Services.env.get("ZENX_APP_INI");
+    if (!appIni) {
+      return;
+    }
+    this.#sps.execProcess = aArgs => {
+      const process = Cc["@mozilla.org/process/util;1"].createInstance(
+        Ci.nsIProcess
+      );
+      process.init(Services.dirsvc.get("XREExeF", Ci.nsIFile));
+      const args = ["-app", appIni, ...aArgs];
+      process.runw(false, args, args.length);
+    };
   }
 
   // Mark: listeners
